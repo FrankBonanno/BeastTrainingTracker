@@ -1,0 +1,9 @@
+# BigWigs packager config: https://github.com/BigWigsMods/packager
+package-as: BeastTrainingTracker
+
+ignore:
+  - README.md
+  - tests       # unit tests - development only
+  - RareData.lua  # local-only copy of RareScanner data (All Rights Reserved) - never ship it
+  - Libs/LibDataBroker-1.1/README.textile
+  - Libs/LibStub/LibStub.toc

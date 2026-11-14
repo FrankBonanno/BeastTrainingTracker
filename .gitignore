@@ -1,0 +1,6 @@
+# Local-only: copy of RareScanner's NPC table ("All Rights Reserved").
+# Keeps rare pins precise on your own install; must never be published.
+RareData.lua
+
+# packager output
+.release/

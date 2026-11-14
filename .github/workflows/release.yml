@@ -1,0 +1,38 @@
+name: Release
+
+# Push a tag (e.g. v1.3.0) to test the addon, package it with the BigWigs
+# packager and upload it to CurseForge. If any test fails, nothing is uploaded.
+# Tags with "alpha" / "beta" in the name upload as alpha / beta releases.
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # lets the packager create a GitHub release too
+
+    steps:
+      - name: Check out (full history for the changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Lua 5.1
+        run: sudo apt-get update && sudo apt-get install -y lua5.1
+
+      - name: Lua syntax check
+        run: |
+          for f in *.lua tests/*.lua; do luac5.1 -p "$f"; done
+          echo "All Lua files parse."
+
+      - name: Unit tests
+        run: lua5.1 tests/run.lua
+
+      - name: Package and upload with BigWigs packager
+        uses: BigWigsMods/packager@v2
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}

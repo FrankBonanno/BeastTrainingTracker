@@ -1,0 +1,359 @@
+-- Unit tests for Beast Training Tracker's logic. Run from the addon folder:
+--   lua5.1 tests/run.lua
+-- Not shipped to CurseForge (.pkgmeta ignores tests/).
+package.path = "./tests/?.lua;" .. package.path
+local H = require("harness")
+local out = io.write
+
+local tests = {}
+local function test(name, fn) tests[#tests + 1] = { name = name, fn = fn } end
+
+local function fail(msg, level) error(msg, (level or 1) + 1) end
+local function ok(v, msg) if not v then fail(msg or "expected a true value", 2) end end
+local function eq(actual, expected, msg)
+  if actual ~= expected then
+    fail(("%sexpected %s, got %s"):format(msg and (msg .. ": ") or "", tostring(expected), tostring(actual)), 2)
+  end
+end
+local function has(s, sub, msg)
+  if type(s) ~= "string" or not s:find(sub, 1, true) then
+    fail(("%sexpected %q to contain %q"):format(msg and (msg .. ": ") or "", tostring(s), sub), 2)
+  end
+end
+
+------------------------------------------------------------------------
+-- Data integrity
+------------------------------------------------------------------------
+test("ability data: ranks are 1..n with non-decreasing pet levels", function()
+  local ns = H.load()
+  ok(#ns.abilities > 0, "no abilities loaded")
+  for _, ab in ipairs(ns.abilities) do
+    ok(#ab.parsed > 0, ab.name .. " has no ranks")
+    for i, r in ipairs(ab.parsed) do
+      eq(r.rank, i, ab.name .. " rank order")
+      ok(type(r.level) == "number" and type(r.tp) == "number", ab.name .. " rank " .. i .. " numbers")
+      if i > 1 then ok(r.level >= ab.parsed[i - 1].level, ab.name .. " rank " .. i .. " level goes down") end
+      for _, t in ipairs(r.teachers) do
+        ok(t.name ~= "" and t.family ~= "" and t.zone ~= "", ab.name .. " has a teacher with missing fields")
+      end
+    end
+  end
+end)
+
+local FAMILIES = {}
+for _, f in ipairs({ "Bat", "Bear", "Bird of Prey", "Boar", "Carrion Bird", "Cat", "Core Hound", "Crab", "Crocolisk",
+  "Fox", "Gorilla", "Hyena", "Raptor", "Scorpid", "Spider", "Tallstrider", "Turtle", "Wind Serpent", "Wolf" }) do
+  FAMILIES[f] = true
+end
+
+test("special pets data: unique names, known families, sane speeds and flags", function()
+  local ns = H.load()
+  local seen = {}
+  ok(#ns.rarePets > 0, "no special pets loaded")
+  for _, p in ipairs(ns.rarePets) do
+    ok(not seen[p.name], "duplicate special pet " .. p.name)
+    seen[p.name] = true
+    ok(FAMILIES[p.family], p.name .. " has unknown family " .. tostring(p.family))
+    ok(p.minLevel > 0, p.name .. " has no level")
+    ok(p.speed == nil or (p.speed >= 0.5 and p.speed <= 3.0), p.name .. " has odd speed")
+    ok(p.rare or p.elite or p.spawned, p.name .. " isn't rare, elite or spawned")
+    eq(ns.rarePetByName[p.name], p, p.name .. " lookup")
+  end
+  ok(seen["The Rake"] and seen["Vulgara the Insatiable"], "expected The Rake and Vulgara in the list")
+end)
+
+test("rare ids are numbers for known beasts", function()
+  local ns = H.load()
+  local n = 0
+  for name, id in pairs(ns.rareIds) do
+    n = n + 1
+    ok(type(id) == "number" and id > 0, name .. " id")
+    ok(ns.rarePetByName[name] or ns.teacherIndex[name], name .. " isn't a known pet or teacher")
+  end
+  ok(n > 0, "no rare ids")
+end)
+
+------------------------------------------------------------------------
+-- Saved data
+------------------------------------------------------------------------
+test("fresh install creates empty saved data with defaults", function()
+  local ns = H.load()
+  ok(ns.db, "db missing")
+  eq(next(ns.db.known), nil, "known should start empty")
+  eq(ns.db.opts.hideKnown, false, "hideKnown default")
+  eq(ns.db.opts.learnToast, true, "learnToast default")
+  ok(type(ns.db.tamedRares) == "table", "tamedRares table")
+end)
+
+test("a higher rank implies the lower ones", function()
+  local ns = H.load()
+  local bite = ns.byName.Bite
+  ns.db.known["Bite#3"] = true
+  eq(ns.Status(bite, 3), "known")
+  eq(ns.Status(bite, 1), "implied")
+  eq(ns.Status(bite, 2), "implied")
+  eq(ns.Status(bite, 4), nil)
+  eq(ns.BestKnown(bite), 3)
+end)
+
+test("backup restores learned ranks and tamed pets if saved data is lost", function()
+  local ns = H.load()
+  ns.db.known["Bite#1"] = true
+  ns.db.tamedRares["The Rake"] = 123
+  ns.db.tamedNicks["The Rake"] = "Kittery"
+  H.fire("PLAYER_LOGOUT")
+  local backup = H.deepcopy(BeastTrainingTrackerBackup)
+
+  local ns2 = H.load({ backup = backup }) -- per-character data gone, backup kept
+  ok(ns2.db.known["Bite#1"], "rank not restored")
+  eq(ns2.db.tamedRares["The Rake"], 123, "tamed pet not restored")
+  eq(ns2.db.tamedNicks["The Rake"], "Kittery", "nickname not restored")
+end)
+
+test("reset wipes learned ranks but keeps the tamed collection", function()
+  local ns = H.load()
+  ns.db.known["Bite#1"] = true
+  ns.db.tamedRares["The Rake"] = 1
+  ns.ResetData()
+  eq(next(ns.db.known), nil, "known not wiped")
+  eq(ns.db.tamedRares["The Rake"], 1, "tamed pets should survive a reset")
+end)
+
+------------------------------------------------------------------------
+-- Detection
+------------------------------------------------------------------------
+test("'You have learned' chat messages record the rank", function()
+  local ns = H.load()
+  H.fire("CHAT_MSG_SYSTEM", "You have learned a new ability: Claw (Rank 2).")
+  ok(ns.db.known["Claw#2"], "Claw 2 not recorded")
+  H.fire("CHAT_MSG_SYSTEM", "You have learned a new spell: Dash (Rank 1).")
+  ok(ns.db.known["Dash#1"], "Dash 1 not recorded")
+  H.fire("CHAT_MSG_SYSTEM", "You have learned a new spell: Fireball (Rank 1).")
+  ok(not ns.db.known["Fireball#1"], "non-pet spell recorded")
+end)
+
+test("Beast Training scan adds ranks and never removes saved ones", function()
+  local ns = H.load()
+  ns.db.known["Bite#1"] = true
+  H.state.trainer = {
+    { "Pet Abilities", "", "header" },
+    { "Claw", "Rank 1", "available" },
+    { "Growl", "Rank 2", "used" },
+  }
+  H.fire("TRAINER_SHOW")
+  ok(ns.db.known["Claw#1"], "Claw 1 not saved")
+  ok(ns.db.known["Growl#2"], "Growl 2 not saved")
+  ok(ns.db.known["Bite#1"], "existing rank was removed")
+  ok(ns.db.lastSync, "lastSync not set")
+
+  H.state.trainer = {} -- window shows nothing (filters, etc.)
+  H.fire("TRAINER_UPDATE")
+  ok(ns.db.known["Claw#1"] and ns.db.known["Bite#1"], "an empty list wiped saved ranks")
+end)
+
+test("pet spellbook ranks count as learned", function()
+  local ns = H.load()
+  H.state.pet = { name = "Fang", family = "Wolf", level = 20, guid = "Pet-0-1",
+    spells = { { "Bite", "Rank 2" }, { "Growl", "Rank 1" }, { "Attack", "" } } }
+  ns.RefreshNow()
+  ok(ns.db.known["Bite#2"] and ns.db.known["Growl#1"], "pet ranks not saved")
+  eq(ns.petRank.Bite, 2)
+  ok(ns.petHas["Bite#2"], "petHas")
+end)
+
+------------------------------------------------------------------------
+-- Planning
+------------------------------------------------------------------------
+test("upgrades: teachable now vs pet needs a level", function()
+  local ns = H.load()
+  local bite = ns.byName.Bite
+  ok(bite.parsed[5].level > bite.parsed[4].level, "test needs Bite 5 to need a higher level than Bite 4")
+  H.state.pet = { name = "Fang", family = "Wolf", level = bite.parsed[4].level, guid = "Pet-0-1",
+    spells = { { "Bite", "Rank 3" } } }
+
+  ns.db.known["Bite#4"] = true
+  ns.RefreshNow()
+  local up
+  for _, u in ipairs(ns.Upgrades()) do if u.ab.name == "Bite" then up = u end end
+  ok(up, "no Bite upgrade")
+  eq(up.from, 3) eq(up.to, 4) eq(up.needLevel, nil)
+
+  wipe(ns.db.known)
+  ns.db.known["Bite#5"] = true
+  ns.RefreshNow()
+  up = nil
+  for _, u in ipairs(ns.Upgrades()) do if u.ab.name == "Bite" then up = u end end
+  ok(up, "no Bite entry when only a too-high rank is known")
+  eq(up.to, 5) eq(up.needLevel, bite.parsed[5].level)
+end)
+
+test("hunt plan: only tameable, non-dungeon, highest missing rank per ability", function()
+  local ns = H.load()
+  H.state.level = 12
+  local plan = ns.HuntPlan(false, false)
+  ok(#plan > 0, "empty hunt plan at level 12")
+  for i, z in ipairs(plan) do
+    if i > 1 then ok(#plan[i - 1].entries >= #z.entries, "zones not sorted by count") end
+    local seenAb = {}
+    for _, e in ipairs(z.entries) do
+      ok(not seenAb[e.ab.name], e.ab.name .. " listed twice in " .. z.zone)
+      seenAb[e.ab.name] = true
+      ok(not ns.IsKnown(e.ab, e.rank.rank), "known rank in plan")
+      for _, t in ipairs(e.teachers) do
+        ok(t.minLevel <= 12, t.name .. " is above level 12")
+        ok(not t.dungeon, t.name .. " is in a dungeon")
+        eq(t.zone, z.zone, "teacher zone")
+      end
+      -- no higher missing rank of this ability is tameable in the same zone
+      for _, r in ipairs(e.ab.parsed) do
+        if r.rank > e.rank.rank and not ns.IsKnown(e.ab, r.rank) then
+          for _, t in ipairs(r.teachers) do
+            ok(not (t.zone == z.zone and t.minLevel <= 12 and not t.dungeon),
+              ("%s %d listed but %d is also tameable in %s"):format(e.ab.name, e.rank.rank, r.rank, z.zone))
+          end
+        end
+      end
+    end
+  end
+
+  for _, r in ipairs(ns.byName.Bite.parsed) do ns.db.known["Bite#" .. r.rank] = true end
+  for _, z in ipairs(ns.HuntPlan(false, false)) do
+    for _, e in ipairs(z.entries) do ok(e.ab.name ~= "Bite", "learned ability still in the plan") end
+  end
+end)
+
+test("needed-here only lists the current zone", function()
+  local ns = H.load()
+  H.state.level, H.state.zone = 12, "Mulgore"
+  local entries, zone = ns.NeededHere()
+  ok(zone:find("Mulgore", 1, true), "zone name")
+  for _, e in ipairs(entries) do
+    for _, t in ipairs(e.teachers) do has(t.zone, "Mulgore", "teacher zone") end
+  end
+end)
+
+------------------------------------------------------------------------
+-- Export / import
+------------------------------------------------------------------------
+test("export and import round trip, including tamed pets", function()
+  local ns = H.load()
+  ns.db.known["Bite#1"], ns.db.known["Bite#2"], ns.db.known["Claw#3"] = true, true, true
+  ns.db.tamedRares["The Rake"] = 1
+  ns.db.tamedNicks["The Rake"] = "Kittery"
+  local s = ns.Export()
+  ok(s:find("^BTT1:"), "export prefix")
+  has(s, "Bite=1,2")
+  has(s, "Claw=3")
+  has(s, "#T:The Rake>Kittery")
+
+  local ns2 = H.load()
+  local added, skipped, tamed = ns2.Import(s)
+  eq(added, 3, "ranks added") eq(skipped, 0, "skipped") eq(tamed, 1, "tamed added")
+  ok(ns2.db.known["Bite#2"] and ns2.db.known["Claw#3"], "ranks imported")
+  ok(ns2.db.tamedRares["The Rake"], "tamed pet imported")
+  eq(ns2.db.petLinks["Kittery|Cat"], "The Rake", "nickname link imported")
+end)
+
+test("import merges, skips junk and rejects non-exports", function()
+  local ns = H.load()
+  ns.db.known["Dash#1"] = true
+  local added = ns.Import("BTT1:Bite=1")
+  eq(added, 1)
+  ok(ns.db.known["Dash#1"], "import removed an existing rank")
+
+  local a, msg = ns.Import("hello there")
+  eq(a, nil, "junk accepted")
+  ok(type(msg) == "string", "no error message")
+
+  local a2, skipped = ns.Import("BTT1:Nope=1;Bite=99")
+  eq(a2, 0) eq(skipped, 2)
+end)
+
+test("old exports without a tamed section still import", function()
+  local ns = H.load()
+  local added, skipped, tamed = ns.Import("BTT1:Bite=1,2;Claw=1")
+  eq(added, 3) eq(skipped, 0) eq(tamed, 0)
+end)
+
+------------------------------------------------------------------------
+-- Special pets
+------------------------------------------------------------------------
+test("renamed pet is recognised after right-click linking, and unlinking clears it", function()
+  local ns = H.load()
+  H.state.pet = { name = "Kittery", family = "Cat", level = 28, guid = "Pet-0-6821-1-40-165189-37E2154097", spells = {} }
+  eq(ns.RS.RareFromPet(), nil, "unlinked pet matched")
+  ns.RS.SetTamed("The Rake", true)
+  ok(ns.db.tamedRares["The Rake"], "not marked tamed")
+  eq(ns.db.tamedNicks["The Rake"], "Kittery")
+  eq(ns.RS.RareFromPet(), "The Rake")
+  ns.RS.SetTamed("The Rake", false)
+  eq(ns.db.tamedRares["The Rake"], nil, "still tamed")
+  eq(ns.RS.RareFromPet(), nil, "link not cleared")
+end)
+
+test("right-click doesn't link a pet of a different family", function()
+  local ns = H.load()
+  H.state.pet = { name = "Fang", family = "Wolf", level = 28, guid = "Pet-0-9", spells = {} }
+  ns.RS.SetTamed("The Rake", true)
+  ok(ns.db.tamedRares["The Rake"], "should still mark tamed")
+  eq(ns.RS.RareFromPet(), nil, "wolf linked to a cat rare")
+end)
+
+test("taming a special pet marks it, and a rename keeps the link", function()
+  local ns = H.load()
+  H.fire("UNIT_SPELLCAST_SENT", "player", "The Rake", "cast-1", 1515)
+  H.state.pet = { name = "The Rake", family = "Cat", level = 10, guid = "Pet-0-NEW", spells = {} }
+  H.fire("UNIT_PET", "player")
+  ok(ns.db.tamedRares["The Rake"], "tame not detected")
+
+  H.state.pet.name = "Kittery"
+  H.fire("UNIT_NAME_UPDATE", "pet")
+  eq(ns.db.tamedNicks["The Rake"], "Kittery", "rename not tracked")
+  eq(ns.db.petLinks["Kittery|Cat"], "The Rake", "renamed link missing")
+  eq(ns.RS.RareFromPet(), "The Rake")
+end)
+
+test("special pet info: speed, type and traits", function()
+  local ns = H.load()
+  local rake = ns.RS.Info("The Rake")
+  eq(rake.speed, 1.2) eq(rake.t.family, "Cat")
+  has(ns.RS.TypeText(rake.t), "Rare")
+  local v = ns.RS.Info("Vulgara the Insatiable")
+  ok(v.t.elite and v.t.unique, "Vulgara should be elite with a unique look")
+  has(ns.RS.TypeText(v.t), "Elite")
+  eq(ns.RS.Info("Not A Pet"), nil)
+end)
+
+test("time and speed formatting", function()
+  local ns = H.load()
+  eq(ns.RS.Ago(30), "30s")
+  eq(ns.RS.Ago(90), "1m")
+  eq(ns.RS.Ago(3660), "1h 1m")
+  eq(ns.RS.Ago(2 * 86400), "2d")
+  has(ns.RS.SpeedText(nil), "?")
+  has(ns.RS.SpeedText(1.2), "1.2")
+  has(ns.RS.SpeedText(2.5), "2.5")
+end)
+
+test("RareScanner missing: no timers, no errors", function()
+  local ns = H.load()
+  eq(ns.RS.Loaded(), false)
+  eq(ns.RS.Status("The Rake"), nil)
+  ok(ns.RS.Get("The Rake") and ns.RS.Get("The Rake").id, "rare id should come from RareIds.lua")
+end)
+
+------------------------------------------------------------------------
+-- Runner
+------------------------------------------------------------------------
+local failed = 0
+for _, t in ipairs(tests) do
+  local good, err = pcall(t.fn)
+  if good then
+    out("  ok    ", t.name, "\n")
+  else
+    failed = failed + 1
+    out("  FAIL  ", t.name, "\n        ", tostring(err), "\n")
+  end
+end
+out(("\n%d tests, %d failed\n"):format(#tests, failed))
+os.exit(failed > 0 and 1 or 0)
