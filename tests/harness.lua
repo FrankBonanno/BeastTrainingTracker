@@ -143,7 +143,7 @@ function H.load(opts)
   GetSpellBookItemName = function(i) local s = S.pet.spells[i] return s[1], s[2] end
 
   GetNumTrainerServices = function() return S.trainer and #S.trainer or 0 end
-  GetTrainerServiceInfo = function(i) local s = S.trainer[i] return s[1], s[2], s[3] end
+  GetTrainerServiceInfo = function(i) return unpack(S.trainer[i]) end
 
   IsAddOnLoaded = function() return false end
 

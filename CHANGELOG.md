@@ -3,6 +3,18 @@
 All notable changes to Beast Training Tracker are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] - 2026-11-14
+
+### Fixed
+- Beast Training sync now saves the correct rank of every ability. Before, every rank on WoW Forever could be saved as Rank 1.
+- Taming a beast no longer counts its abilities as learned straight away. They're counted once your pet has taught them to you and the game's "You have learned" message appears.
+- "You have learned" messages that show the ability as a spell link (for example "[Swipe]") are now detected, with the right rank.
+- Resyncing (opening Beast Training after a reset, or importing a backup) no longer shows a "new pet abilities learned" popup for ranks you already had.
+- The popup now resizes to fit its text, so long lines no longer spill past the bottom edge.
+
+### Added
+- `/btt dump` lists what the open Beast Training window reports for each ability, to help diagnose sync problems.
+
 ## [1.2.0] - 2026-11-14
 
 First public release.

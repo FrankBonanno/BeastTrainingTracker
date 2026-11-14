@@ -132,6 +132,29 @@ test("'You have learned' chat messages record the rank", function()
   ok(not ns.db.known["Fireball#1"], "non-pet spell recorded")
 end)
 
+test("spell-link 'You have learned' message takes the rank from the pet", function()
+  local ns = H.load()
+  H.state.pet = { name = "Bruin", family = "Bear", level = 30, guid = "Pet-0-2",
+    spells = { { "Swipe", "Rank 3" }, { "Bite", "Rank 4" } } }
+  ns.RefreshNow()
+  ok(not ns.db.known["Swipe#3"], "taming alone should not count as learned")
+  H.fire("CHAT_MSG_SYSTEM", "You have learned a new spell: |cff71d5ff|Hspell:16829:0|h[Swipe]|h|r.")
+  ok(ns.db.known["Swipe#3"], "Swipe 3 not recorded from spell link")
+end)
+
+test("Beast Training scan reads ranks in this server's field order", function()
+  local ns = H.load()
+  -- name, type, icon, reqLevel, rank (as seen in game with /btt debug)
+  H.state.trainer = {
+    { "Bite", "used", 132278, 8, "Rank 2" },
+    { "Bite", "used", 132278, 16, "Rank 3" },
+    { "Growl", "used", 132270, 10, "Rank 2" },
+  }
+  H.fire("TRAINER_SHOW")
+  ok(ns.db.known["Bite#2"] and ns.db.known["Bite#3"], "Bite ranks not read")
+  ok(ns.db.known["Growl#2"], "Growl 2 not read")
+end)
+
 test("Beast Training scan adds ranks and never removes saved ones", function()
   local ns = H.load()
   ns.db.known["Bite#1"] = true
@@ -151,12 +174,12 @@ test("Beast Training scan adds ranks and never removes saved ones", function()
   ok(ns.db.known["Claw#1"] and ns.db.known["Bite#1"], "an empty list wiped saved ranks")
 end)
 
-test("pet spellbook ranks count as learned", function()
+test("pet spellbook ranks are not learned until the pet teaches them", function()
   local ns = H.load()
   H.state.pet = { name = "Fang", family = "Wolf", level = 20, guid = "Pet-0-1",
     spells = { { "Bite", "Rank 2" }, { "Growl", "Rank 1" }, { "Attack", "" } } }
   ns.RefreshNow()
-  ok(ns.db.known["Bite#2"] and ns.db.known["Growl#1"], "pet ranks not saved")
+  ok(not ns.db.known["Bite#2"] and not ns.db.known["Growl#1"], "freshly tamed pet's ranks were saved as learned")
   eq(ns.petRank.Bite, 2)
   ok(ns.petHas["Bite#2"], "petHas")
 end)

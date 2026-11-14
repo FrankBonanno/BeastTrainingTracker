@@ -147,14 +147,16 @@ end
 function ns.CanTame(t) return t.minLevel <= ns.PlayerLevel() end
 
 -- Record a learned rank. Returns true if it was new. Never removes anything.
-local function Mark(name, rank)
+-- quiet = a resync of ranks you already had (Beast Training window, backup
+-- import), not something you just learned, so no popup.
+local function Mark(name, rank, quiet)
   local db = ns.db
   if not db or not byName[name] or not rank then return end
   local k = Key(name, rank)
   if db.known[k] then return end
   db.known[k] = true
   ns.learnedSerial = (ns.learnedSerial or 0) + 1
-  if ns.OnLearned then ns.OnLearned(name, rank) end
+  if ns.OnLearned then ns.OnLearned(name, rank, quiet) end
   return true
 end
 
@@ -173,8 +175,7 @@ function ns.OnRefresh(fn) ns.refreshers[#ns.refreshers + 1] = fn end
 local ScanPet -- forward
 function ns.RefreshNow()
   if not ns.db then return end
-  local added = ScanPet()
-  if added > 0 then Announce(added, "your pet's spellbook") end
+  ScanPet()
   for _, fn in ipairs(ns.refreshers) do fn() end
 end
 
@@ -204,7 +205,7 @@ local function ScanBeastTraining()
       local an, ar = NameRank(name, sub)
       if an then
         matched = matched + 1
-        if Mark(an, ar) then added = added + 1 end
+        if Mark(an, ar, true) then added = added + 1 end
       end
     end
   end
@@ -234,6 +235,24 @@ local function IsBeastTraining()
   return TrainerTitle():lower():find("beast", 1, true) ~= nil
 end
 
+-- GetTrainerServiceInfo's field order differs between clients:
+--   classic:     name, "Rank 2", "used", ...
+--   this server: name, "used", icon, reqLevel, "Rank 2"
+-- so pick the type and rank out by what they look like, not where they are.
+local SERVICE_TYPES = { header = true, available = true, unavailable = true, used = true }
+local function ReadService(ok, name, ...)
+  if not ok or not name then return end
+  local sub, typ
+  for i = 1, select("#", ...) do
+    local v = select(i, ...)
+    if type(v) == "string" then
+      if SERVICE_TYPES[v] then typ = typ or v
+      elseif v:find("%d") then sub = sub or v end
+    end
+  end
+  return name, sub, typ
+end
+
 -- Reads whatever the trainer list currently shows. Never touches the
 -- window's own filters (that used to break the "hide learned" checkbox).
 local function ScanTrainer()
@@ -241,14 +260,14 @@ local function ScanTrainer()
   local beast = IsBeastTraining()
   local n, matched, added = GetNumTrainerServices() or 0, 0, 0
   for i = 1, n do
-    local ok, name, sub, typ = pcall(GetTrainerServiceInfo, i)
-    if ok and name and typ ~= "header" then
+    local name, sub, typ = ReadService(pcall(GetTrainerServiceInfo, i))
+    if name and typ ~= "header" then
       local an, ar = NameRank(name, sub)
       if an then
         matched = matched + 1
         -- In Beast Training every listed ability is one you've learned.
         -- At a Pet Trainer NPC only "used" entries are already learned.
-        if (beast or typ == "used") and Mark(an, ar) then added = added + 1 end
+        if (beast or typ == "used") and Mark(an, ar, beast) then added = added + 1 end
       end
     end
   end
@@ -281,18 +300,19 @@ local function HookTrainer()
   hooked = true
 end
 
--- Current pet's spellbook: anything the pet has, you've learned.
+-- Current pet's spellbook. This is what the PET has, not what you've
+-- learned: a freshly tamed beast has its abilities before it teaches them
+-- to you. That comes later as "You have learned a new spell", which
+-- ParseLearned picks up.
 function ScanPet()
   wipe(ns.petHas)
   wipe(ns.petRank)
-  if not UnitExists("pet") then return 0 end
-  local added = 0
+  if not UnitExists("pet") then return end
   local function take(name, sub)
     local an, ar = NameRank(name, sub)
     if an then
       ns.petHas[Key(an, ar)] = true
       ns.petRank[an] = math.max(ns.petRank[an] or 0, ar)
-      if Mark(an, ar) then added = added + 1 end
     end
   end
   if C_SpellBook and C_SpellBook.HasPetSpells and C_SpellBook.GetSpellBookItemName and Enum and Enum.SpellBookSpellBank then
@@ -302,7 +322,6 @@ function ScanPet()
     local n = HasPetSpells() or 0
     for i = 1, n do take(GetSpellBookItemName(i, BOOKTYPE_PET or "pet")) end
   end
-  return added
 end
 ns.ScanPet = ScanPet
 
@@ -318,11 +337,39 @@ for _, g in ipairs({ "ERR_LEARN_ABILITY_S", "ERR_LEARN_SPELL_S", "ERR_PET_LEARN_
   if type(_G[g]) == "string" then learnPatterns[#learnPatterns + 1] = ToPattern(_G[g]) end
 end
 
+-- Rank text ("Rank 2") for a spell ID, across client API versions
+local function SpellRankText(id)
+  if not id then return end
+  local ok, sub
+  if C_Spell and C_Spell.GetSpellSubtext then ok, sub = pcall(C_Spell.GetSpellSubtext, id)
+  elseif GetSpellSubtext then ok, sub = pcall(GetSpellSubtext, id) end
+  if ok and type(sub) == "string" and sub:find("%d") then return sub end
+  if GetSpellInfo then
+    local ok2, _, rank = pcall(GetSpellInfo, id)
+    if ok2 and type(rank) == "string" and rank:find("%d") then return rank end
+  end
+end
+
+-- The message can be plain ("Bite (Rank 3)") or a spell link with no rank
+-- in the text ("|Hspell:16829|h[Swipe]|h"). For links, ask the game for the
+-- rank; failing that, it's the rank your current pet has (it just taught you).
+local function NameRankFromMessage(cap)
+  local id = tonumber(cap:match("|Hspell:(%d+)"))
+  local text = cap:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|H.-|h(.-)|h", "%1")
+  text = text:gsub("^%[(.-)%]$", "%1")
+  local an, ar = NameRank(text, nil)
+  if not an or text:find("%d") then return an, ar end
+  local sub = SpellRankText(id)
+  if sub then return an, RankFromSub(sub) end
+  ScanPet()
+  return an, ns.petRank[an] or ar
+end
+
 local function ParseLearned(msg)
   for _, p in ipairs(learnPatterns) do
     local cap = msg:match(p)
     if cap then
-      local an, ar = NameRank(cap, nil)
+      local an, ar = NameRankFromMessage(cap)
       if an and Mark(an, ar) then
         Say(("learned %s %d"):format(an, ar))
         ns.Refresh()
@@ -617,7 +664,7 @@ function ns.Import(text)
       for n in list:gmatch("%d+") do
         local rk = tonumber(n)
         if ab.parsed[rk] then
-          if Mark(name, rk) then added = added + 1 end
+          if Mark(name, rk, true) then added = added + 1 end
         else
           skipped = skipped + 1
         end
@@ -851,6 +898,22 @@ SlashCmdList.BEASTTRAININGTRACKER = function(msg)
     pcall(dbgFrame.RegisterAllEvents, dbgFrame)
     P("debug on - open Beast Training to see what it reports. /btt off to stop")
     ns.PrintStatus()
+  elseif msg == "dump" then
+    -- Everything the open Beast Training / trainer window reports, per entry
+    local function show(...)
+      local t = {}
+      for i = 1, select("#", ...) do t[#t + 1] = tostring((select(i, ...))) end
+      return (table.concat(t, "  /  "):gsub("|", "||"))
+    end
+    local n = GetNumTrainerServices and GetNumTrainerServices() or 0
+    local c = GetNumCrafts and GetNumCrafts() or 0
+    P(("trainer services: %d   crafts: %d"):format(n, c))
+    for i = 1, math.min(n, 12) do
+      P("T" .. i, show(GetTrainerServiceInfo(i)))
+      if GetTrainerServiceDescription then P("   desc:", show(GetTrainerServiceDescription(i))) end
+    end
+    for i = 1, math.min(c, 12) do P("C" .. i, show(GetCraftInfo(i))) end
+    if n == 0 and c == 0 then P("open Beast Training first, then /btt dump") end
   elseif msg == "events" then
     ns.logAll = not ns.logAll
     if ns.logAll then pcall(dbgFrame.RegisterAllEvents, dbgFrame) else dbgFrame:UnregisterAllEvents() end

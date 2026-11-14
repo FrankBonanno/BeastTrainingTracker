@@ -123,7 +123,7 @@ end
 -- On-screen popup ("toast") so a new ability is hard to miss
 ------------------------------------------------------------------------
 local toast = CreateFrame("Button", "BeastTrainingTrackerToast", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
-toast:SetSize(320, 64)
+toast:SetSize(360, 64)
 toast:SetPoint("TOP", UIParent, "TOP", 0, -170)
 toast:SetFrameStrata("DIALOG")
 toast:Hide()
@@ -138,7 +138,7 @@ if toast.SetBackdrop then
 end
 toast.icon = toast:CreateTexture(nil, "ARTWORK")
 toast.icon:SetSize(40, 40)
-toast.icon:SetPoint("LEFT", 12, 0)
+toast.icon:SetPoint("TOPLEFT", 12, -12)
 toast.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 toast.title = toast:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 toast.title:SetPoint("TOPLEFT", toast.icon, "TOPRIGHT", 10, 0)
@@ -167,7 +167,10 @@ function ns.Toast(title, lines, icon)
   toast.icon:SetTexture(icon or "Interface\\Icons\\Ability_Hunter_BeastTraining")
   toast.title:SetText("|cffabd473" .. title .. "|r")
   toast.body:SetText(table.concat(lines, "\n"))
-  toast:SetHeight(math.max(64, 40 + #lines * 16))
+  -- Size to the text as actually drawn, since long lines wrap
+  local th = toast.title.GetStringHeight and toast.title:GetStringHeight() or 16
+  local bh = toast.body.GetStringHeight and toast.body:GetStringHeight() or #lines * 16
+  toast:SetHeight(math.max(64, 12 + th + 4 + bh + 14))
   toast:SetAlpha(1)
   toast:Show()
   hideAt = GetTime() + 8
@@ -206,9 +209,11 @@ local function FlushLearned()
 end
 
 -- A new rank got recorded: popup, and maybe the pet can use it now
-ns.OnLearned = function(name, rank)
-  pending[#pending + 1] = { name = name, rank = rank }
-  if #pending == 1 and C_Timer then C_Timer.After(0.5, FlushLearned) end
+ns.OnLearned = function(name, rank, quiet)
+  if not quiet then
+    pending[#pending + 1] = { name = name, rank = rank }
+    if #pending == 1 and C_Timer then C_Timer.After(0.5, FlushLearned) end
+  end
   if C_Timer then C_Timer.After(1.5, function() ns.CheckUpgrades() end) end
 end
 
