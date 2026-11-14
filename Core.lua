@@ -649,6 +649,7 @@ local DEFAULTS = {
   petOnly = false, hideKnown = false, hideTrainer = false, hideHigh = false, zoneOnly = false,
   -- hunt planner
   huntPetOnly = false, huntDungeons = false, huntSortCount = false, huntBothFactions = false,
+  hideQuestieWarning = false,
   -- map & alerts
   mapPins = true, minimapPins = true, pinsOff = false, learnToast = true, routeOpenMap = true, routeLines = true,
   -- rare pets
@@ -809,7 +810,8 @@ end
 SLASH_BEASTTRAININGTRACKER1 = "/btt"
 SLASH_BEASTTRAININGTRACKER2 = "/beasttraining"
 SlashCmdList.BEASTTRAININGTRACKER = function(msg)
-  msg = (msg or ""):lower():match("^%s*(.-)%s*$")
+  local raw = (msg or ""):match("^%s*(.-)%s*$")
+  msg = raw:lower()
   if msg == "reset confirm" then
     ns.ResetData()
   elseif msg == "reset" then
@@ -826,6 +828,8 @@ SlashCmdList.BEASTTRAININGTRACKER = function(msg)
     or msg == "import" or msg == "rarepets" or msg == "abilities" then
     local key = ({ export = "backup", import = "backup", rarepets = "rares", settings = "map" })[msg] or msg
     if ns.ShowTab and ns.TAB then ns.ShowTab(ns.TAB[key]) end
+  elseif msg:match("^where ") then
+    if ns.Geo then ns.Geo.Explain(raw:match("^%S+%s+(.-)$")) end
   elseif msg == "petinfo" then
     if ns.RS then ns.RS.PetInfo() end
   elseif msg == "pins" then
@@ -860,6 +864,7 @@ SlashCmdList.BEASTTRAININGTRACKER = function(msg)
     Say("/btt pins - show/hide all beast pins on the map (same as minimap right-click)")
     Say("/btt tracker - show/hide the zone tracker   /btt minimap - show/hide minimap button")
     Say("/btt clearwp - remove waypoints this addon added   /btt status - saved data info")
+    Say("/btt where <beast> - show where a beast's map locations come from")
     Say("/btt rares - rare teachers you still need, with RareScanner timers")
     Say("/btt reset - wipe saved data (asks first)")
   else

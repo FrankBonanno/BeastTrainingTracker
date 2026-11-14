@@ -254,6 +254,48 @@ function Geo.Tag(name)
 end
 
 -- Number of beasts with known locations (for the status line)
+-- /btt where <beast>: where this beast's locations come from (for bug reports)
+function Geo.Explain(name)
+  local Say = ns.Say
+  if not name or name == "" then Say("usage: /btt where <beast name>") return end
+  -- accept any capitalization: "moss stalker" -> "Moss Stalker"
+  local want = name:lower()
+  for n in pairs(ns.teacherIndex) do if n:lower() == want then name = n break end end
+  for n in pairs(ns.rarePetByName or {}) do if n:lower() == want then name = n break end end
+  Say(("locations for |cffffffff%s|r:"):format(name))
+  local known = ns.teacherIndex[name] or (ns.rarePetByName and ns.rarePetByName[name])
+  Say("  in the addon's beast data: " .. (known and "yes" or "|cffff4040no - check the spelling|r"))
+  if not Geo.HasQuestie() then
+    Say("  Questie: not installed")
+  elseif not Geo.ready then
+    Say("  Questie: still loading")
+  else
+    local ids = NpcDB.IdsByName(name) or {}
+    Say(("  Questie: %d NPC id(s) %s"):format(#ids, table.concat(ids, ", ")))
+    for _, id in ipairs(ids) do
+      local ok, sp = pcall(NpcDB.Get, id, "spawns")
+      if ok and type(sp) == "table" then
+        for area, pts in pairs(sp) do
+          local m = MapFor(area)
+          Say(("    zone %s -> map %s: %d spawn point(s)%s"):format(tostring(area), tostring(m),
+            type(pts) == "table" and #pts or 0, m and "" or " |cffff4040(zone not mapped - not shown)|r"))
+        end
+      else
+        Say(("    id %s: no spawn data"):format(tostring(id)))
+      end
+    end
+  end
+  local seen = Geo.seen and Geo.seen[name]
+  Say(("  your sightings: %d spot(s)"):format(seen and #seen or 0))
+  Say("  local rare data: " .. ((ns.rsRares and ns.rsRares[name]) and "yes" or "no"))
+  local info = Geo.Lookup(name)
+  local by = {}
+  for _, s in ipairs(info and info.spawns or {}) do by[s.src] = (by[s.src] or 0) + 1 end
+  local parts = {}
+  for src, n in pairs(by) do parts[#parts + 1] = ("%s %d"):format(src, n) end
+  Say("  used for pins/routes: " .. (#parts > 0 and table.concat(parts, ", ") or "nothing"))
+end
+
 function Geo.LocatedCount()
   local n = 0
   for _, v in pairs(qcache) do if v and #v.spawns > 0 then n = n + 1 end end

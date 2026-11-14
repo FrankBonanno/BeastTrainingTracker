@@ -644,6 +644,14 @@ test("route: beasts that can't be placed are named in chat", function()
   ok(H.said("no location known for: Mist Creeper"), "missing beast not reported")
 end)
 
+test("/btt where explains a beast's location sources, any capitalization", function()
+  H.load()
+  SlashCmdList.BEASTTRAININGTRACKER("where prairie wolf")
+  ok(H.said("locations for |cffffffffPrairie Wolf|r"), "name not matched case-insensitively")
+  ok(H.said("Questie: not installed"), "Questie status missing")
+  ok(H.said("used for pins/routes: nothing"), "summary missing")
+end)
+
 test("route: TomTom gets one waypoint per stop", function()
   local ns = H.load()
   local added, removed = 0, 0

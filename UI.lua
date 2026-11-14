@@ -1340,6 +1340,34 @@ end
 ------------------------------------------------------------------------
 -- Tab 5: Backup
 ------------------------------------------------------------------------
+-- Shown after login when Questie isn't installed: without it, beast
+-- locations are limited to what you've spotted yourself.
+StaticPopupDialogs["BTT_NO_QUESTIE"] = {
+  text = "Beast Training Tracker\n\nQuestie isn't installed, so most beast locations are unknown.\n\n"
+    .. "Map pins, waypoints and hunt routes will only include beasts you've spotted yourself "
+    .. "(targeted, moused over or seen a nameplate). Install Questie to see every beast's spawn points.",
+  button1 = OKAY or "OK",
+  button2 = "Don't remind me",
+  OnCancel = function()
+    -- "Don't remind me" (Escape is off for this popup, so it can't trigger this by accident)
+    if ns.db then ns.db.opts.hideQuestieWarning = true end
+  end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = false,
+  preferredIndex = 3,
+}
+
+ns.OnLogin(function()
+  if C_Timer then
+    C_Timer.After(8, function()
+      if ns.db and not ns.db.opts.hideQuestieWarning and not ns.Geo.HasQuestie() then
+        StaticPopup_Show("BTT_NO_QUESTIE")
+      end
+    end)
+  end
+end)
+
 StaticPopupDialogs["BTT_RESET_DATA"] = {
   text = "Beast Training Tracker\n\nWipe ALL saved learned ranks for this character?\nOpen Beast Training afterwards to resync.",
   button1 = YES or "Yes",
