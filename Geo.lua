@@ -1,15 +1,35 @@
 local _, ns = ...
 
 ------------------------------------------------------------------------
--- Beast coordinates (from QuestieDB), TomTom waypoints, map pins
+-- Beast locations, waypoints and map pins.
+--
+-- Works on its own and gets better with optional addons:
+--   * own sightings  - every teacher / special pet you target, mouse over or
+--                      see a nameplate of is remembered (account-wide). Always on.
+--   * Questie        - QuestieDB spawn points for every beast
+--   * RareScanner    - where rares were last seen (yours + guild)
+--   * RareData.lua   - local-only rare spawn file (not published)
+-- Waypoints use TomTom when installed, otherwise a built-in map pin + a
+-- minimap marker that sits on the minimap edge pointing the way.
+-- Map pins use HereBeDragons, bundled in Libs.
 ------------------------------------------------------------------------
-local Geo = { ready = false, located = 0, status = "waiting for login" }
+local Geo = { ready = false, status = "waiting for login" }
 ns.Geo = Geo
 
-local cache = {}       -- npc name -> info table | false
+local qcache = {}      -- npc name -> { spawns=, rare=, elite= } | false   (QuestieDB part only)
 local areaToMap        -- Questie areaId -> uiMapID
 local mapByName        -- "Duskwood" -> uiMapID
 
+------------------------------------------------------------------------
+-- Optional addons
+------------------------------------------------------------------------
+function Geo.HasQuestie() return _G.NpcDB ~= nil and NpcDB.IdsByName ~= nil end
+function Geo.HasTomTom() return TomTom and TomTom.AddWaypoint and true or false end
+function Geo.HasRareScanner() return ns.RS and ns.RS.Loaded() or false end
+
+------------------------------------------------------------------------
+-- QuestieDB zone ids -> map ids
+------------------------------------------------------------------------
 local function ToTable(v)
   if type(v) == "string" then
     local fn = loadstring and loadstring(v)
@@ -72,27 +92,13 @@ function Geo.MapIdByName(zone)
   return e and e.id
 end
 
--- Returns { spawns = {{map=, x=, y=}...}, rare=bool, elite=bool } or nil
-function Geo.Lookup(name)
-  local c = cache[name]
-  if c ~= nil then return c or nil end
-
-  -- Rares: RareScanner's spawn point + patrol path beats Questie's data
-  local rs = ns.rsRares and ns.rsRares[name]
-  if rs then
-    local res = { rare = true, rs = true, spawns = { { map = rs.map, x = rs.x, y = rs.y } } }
-    for _, pt in ipairs(rs.path or {}) do
-      res.spawns[#res.spawns + 1] = { map = rs.map, x = pt[1], y = pt[2] }
-    end
-    Geo.located = Geo.located + 1
-    cache[name] = res
-    return res
-  end
-
+-- QuestieDB data for one npc name (cached once QuestieDB is ready)
+local function QuestieInfo(name)
   if not Geo.ready then return nil end
+  local c = qcache[name]
+  if c ~= nil then return c or nil end
   local res = { spawns = {} }
-  local ids = NpcDB.IdsByName(name)
-  for _, id in ipairs(ids or {}) do
+  for _, id in ipairs(NpcDB.IdsByName(name) or {}) do
     local ok, rank = pcall(NpcDB.Get, id, "rank")
     if ok and rank then
       if rank == 2 or rank == 4 then res.rare = true end
@@ -106,36 +112,20 @@ function Geo.Lookup(name)
           for _, pt in ipairs(pts) do
             local x, y = pt[1], pt[2]
             if x and y and x >= 0 and y >= 0 then
-              res.spawns[#res.spawns + 1] = { map = m, x = x / 100, y = y / 100 }
+              res.spawns[#res.spawns + 1] = { map = m, x = x / 100, y = y / 100, src = "questie" }
             end
           end
         end
       end
     end
   end
-  if #res.spawns > 0 then Geo.located = Geo.located + 1 end
-  cache[name] = (#res.spawns > 0 or res.rare) and res or false
-  return cache[name] or nil
+  qcache[name] = (#res.spawns > 0 or res.rare or res.elite) and res or false
+  return qcache[name] or nil
 end
 
-function Geo.IsRare(name)
-  if ns.db and ns.db.rares[name] then return true end
-  local sp = ns.rarePetByName and ns.rarePetByName[name]
-  if sp and sp.rare then return true end
-  local info = Geo.Lookup(name)
-  return info and info.rare or false
-end
-
-function Geo.Tag(name)
-  if Geo.IsRare(name) then
-    local st = ns.RS and ns.RS.Status(name)
-    return " |cffff8000[Rare]|r" .. (st and st.short and (" " .. st.short) or "")
-  end
-  local info = Geo.Lookup(name)
-  if info and info.elite then return " |cffffd100[Elite]|r" end
-  return ""
-end
-
+------------------------------------------------------------------------
+-- Player position
+------------------------------------------------------------------------
 local function PlayerPos()
   if not (C_Map and C_Map.GetBestMapForUnit) then return end
   local m = C_Map.GetBestMapForUnit("player")
@@ -143,11 +133,129 @@ local function PlayerPos()
   local p = C_Map.GetPlayerMapPosition(m, "player")
   if p then
     local x, y = p:GetXY()
-    return m, x, y
+    if x and y and (x > 0 or y > 0) then return m, x, y end
   end
   return m
 end
 Geo.PlayerPos = PlayerPos
+
+------------------------------------------------------------------------
+-- Own sightings (account-wide, BeastTrainingTrackerSeen)
+--   Seen[name] = { {map, x, y, time}, ... }
+-- The game doesn't give other units' positions, so a sighting is where
+-- you were standing - close enough when a nameplate is in view.
+------------------------------------------------------------------------
+local MAX_SPOTS = 15
+local lastRecord = {}
+
+local function Tracked(name)
+  return name and (ns.teacherIndex[name] or (ns.rarePetByName and ns.rarePetByName[name])) and true or false
+end
+
+function Geo.RecordSighting(unit)
+  if not Geo.seen or not UnitExists(unit) or UnitIsPlayer(unit) or UnitPlayerControlled(unit) then return end
+  local name = UnitName(unit)
+  if not Tracked(name) then return end
+  local now = time()
+  if lastRecord[name] and now - lastRecord[name] < 15 then return end
+  lastRecord[name] = now
+  local m, x, y = PlayerPos()
+  if not (m and x and y) then return end
+  x, y = math.floor(x * 1000 + 0.5) / 1000, math.floor(y * 1000 + 0.5) / 1000
+
+  local list = Geo.seen[name]
+  if not list then list = {}; Geo.seen[name] = list end
+  for _, p in ipairs(list) do
+    if p[1] == m and (p[2] - x) ^ 2 + (p[3] - y) ^ 2 < 0.0003 then
+      p[4] = now -- same spot, just refresh the time
+      return
+    end
+  end
+  list[#list + 1] = { m, x, y, now }
+  if #list > MAX_SPOTS then table.remove(list, 1) end
+  ns.seenSerial = (ns.seenSerial or 0) + 1
+  Geo.QueuePins()
+  return true
+end
+
+function Geo.SeenCount()
+  local n = 0
+  for _ in pairs(Geo.seen or {}) do n = n + 1 end
+  return n
+end
+
+------------------------------------------------------------------------
+-- All known spots for a beast, from every source.
+-- Returns { spawns = {{map=, x=, y=, src=}...}, rare=, elite= } or nil
+------------------------------------------------------------------------
+function Geo.Lookup(name)
+  local res = { spawns = {} }
+  local function add(map, x, y, src)
+    if map and x and y then res.spawns[#res.spawns + 1] = { map = map, x = x, y = y, src = src } end
+  end
+
+  -- local rare file (precise spawn + patrol path)
+  local rs = ns.rsRares and ns.rsRares[name]
+  if rs then
+    res.rare = true
+    add(rs.map, rs.x, rs.y, "rare")
+    for _, pt in ipairs(rs.path or {}) do add(rs.map, pt[1], pt[2], "rare") end
+  end
+
+  -- QuestieDB
+  local q = QuestieInfo(name)
+  if q then
+    res.rare, res.elite = res.rare or q.rare, q.elite
+    if not rs then
+      for _, s in ipairs(q.spawns) do res.spawns[#res.spawns + 1] = s end
+    end
+  end
+
+  -- your own sightings
+  for _, p in ipairs(Geo.seen and Geo.seen[name] or {}) do add(p[1], p[2], p[3], "seen") end
+
+  -- RareScanner: where it was last seen
+  local r = ns.RS and ns.RS.Get(name)
+  if r and Geo.HasRareScanner() then
+    local ls = ns.RS.LastSeen(r.id)
+    if ls then add(ls.map, ls.x, ls.y, "rarescanner") end
+  end
+
+  if #res.spawns == 0 and not res.rare and not res.elite then return nil end
+  return res
+end
+
+function Geo.IsRare(name)
+  if ns.db and ns.db.rares[name] then return true end
+  local sp = ns.rarePetByName and ns.rarePetByName[name]
+  if sp and sp.rare then return true end
+  if ns.rsRares and ns.rsRares[name] then return true end
+  local q = QuestieInfo(name)
+  return q and q.rare or false
+end
+
+function Geo.IsElite(name)
+  local sp = ns.rarePetByName and ns.rarePetByName[name]
+  if sp and sp.elite then return true end
+  local q = QuestieInfo(name)
+  return q and q.elite or false
+end
+
+function Geo.Tag(name)
+  if Geo.IsRare(name) then
+    local st = ns.RS and ns.RS.Status(name)
+    return " |cffff8000[Rare]|r" .. (st and st.short and (" " .. st.short) or "")
+  end
+  if Geo.IsElite(name) then return " |cffffd100[Elite]|r" end
+  return ""
+end
+
+-- Number of beasts with known locations (for the status line)
+function Geo.LocatedCount()
+  local n = 0
+  for _, v in pairs(qcache) do if v and #v.spawns > 0 then n = n + 1 end end
+  return n
+end
 
 -- Nearest spawn to you if you're on that map, else the middle of the pack
 function Geo.BestSpawn(info, zoneName)
@@ -178,67 +286,174 @@ function Geo.BestSpawn(info, zoneName)
   return best
 end
 
+-- Where to send the player for this beast. Returns spot, label suffix | nil, reason
+function Geo.Destination(t)
+  -- a rare RareScanner saw in the last two days: go where it was actually seen
+  local r = ns.RS and ns.RS.Get(t.name)
+  if r and Geo.HasRareScanner() then
+    local seen = ns.RS.LastSeen(r.id)
+    local now = (GetServerTime and GetServerTime()) or time()
+    if seen and seen.map and seen.x and seen.y and seen.time and now - seen.time < 2 * 86400 then
+      return { map = seen.map, x = seen.x, y = seen.y }, " (last seen)"
+    end
+  end
+  local info = Geo.Lookup(t.name)
+  if info and #info.spawns > 0 then return Geo.BestSpawn(info, t.zone) end
+  if Geo.HasQuestie() and not Geo.ready then
+    return nil, nil, "beast locations are still loading - try again in a moment."
+  end
+  return nil, nil, ("no location known yet for %s - it's in %s. %s"):format(t.name, t.zone or "?",
+    Geo.HasQuestie() and "" or "Spot it once (target or mouse over it) and it's remembered, or install Questie for every spawn.")
+end
+
 ------------------------------------------------------------------------
--- TomTom
+-- Waypoints: TomTom if installed, otherwise built in
 ------------------------------------------------------------------------
 Geo.uids = {}
 
-function Geo.HasTomTom() return TomTom and TomTom.AddWaypoint and true or false end
+local target           -- { map=, x=, y=, label= } for the built-in waypoint
+local tWorld, tMini    -- its pins
+local HBD, HBDPins
+local REF = "BeastTrainingTracker"
+local REF_TARGET = "BeastTrainingTrackerTarget"
 
-function Geo.Waypoint(t, label, quiet)
-  if not Geo.HasTomTom() then
-    if not quiet then ns.Say("TomTom isn't loaded, so waypoints aren't available.") end
-    return
-  end
-  local s
-  -- a rare RareScanner saw in the last two days: go where it was actually seen
-  local rs = ns.RS and ns.RS.Get(t.name)
-  if rs then
-    local seen = ns.RS.LastSeen(rs.id)
-    local now = (GetServerTime and GetServerTime()) or time()
-    if seen and seen.map and seen.x and seen.y and seen.time and now - seen.time < 2 * 86400 then
-      s = { map = seen.map, x = seen.x, y = seen.y }
-      label = (label or t.name) .. " (last seen)"
-    end
-  end
-  if not s then
-    local hasLocal = ns.rsRares and ns.rsRares[t.name]
-    if not Geo.ready and not hasLocal then
-      if not quiet then ns.Say("beast locations are still loading (or QuestieDB isn't installed).") end
-      return
-    end
-    local info = Geo.Lookup(t.name)
-    if not info or #info.spawns == 0 then
-      if not quiet then ns.Say(("no coordinates known for %s (%s)."):format(t.name, t.zone)) end
-      return
-    end
-    s = Geo.BestSpawn(info, t.zone)
-  end
-  local ok, uid = pcall(TomTom.AddWaypoint, TomTom, s.map, s.x, s.y, {
-    title = label or t.name, persistent = false, minimap = true, world = true, from = "Beast Training Tracker",
-  })
-  if ok and uid then
-    Geo.uids[#Geo.uids + 1] = uid
-    if not quiet then ns.Say(("waypoint set: %s (%.0f, %.0f)"):format(label or t.name, s.x * 100, s.y * 100)) end
-    return uid
-  end
+local function Libs()
+  HBD = HBD or (LibStub and LibStub("HereBeDragons-2.0", true))
+  HBDPins = HBDPins or (LibStub and LibStub("HereBeDragons-Pins-2.0", true))
+  return HBDPins
 end
 
--- One waypoint per teacher in the list; returns how many were added
+local function TargetPin(size)
+  local p = CreateFrame("Button", nil, UIParent)
+  p:SetSize(size, size)
+  p.border = p:CreateTexture(nil, "BACKGROUND")
+  p.border:SetPoint("TOPLEFT", -2, 2)
+  p.border:SetPoint("BOTTOMRIGHT", 2, -2)
+  p.border:SetColorTexture(1, 0.82, 0, 1)
+  p.tex = p:CreateTexture(nil, "ARTWORK")
+  p.tex:SetAllPoints()
+  p.tex:SetTexture("Interface\\Icons\\Ability_Hunter_BeastTaming")
+  p.tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+  p:RegisterForClicks("AnyUp")
+  p:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:AddLine(target and target.label or "Waypoint", 1, 0.82, 0)
+    GameTooltip:AddLine("Beast Training Tracker waypoint", 0.8, 0.8, 0.8)
+    GameTooltip:AddLine("Click to clear", 0.5, 0.5, 0.5)
+    GameTooltip:Show()
+  end)
+  p:SetScript("OnLeave", GameTooltip_Hide)
+  p:SetScript("OnClick", function() Geo.ClearTarget(true) end)
+  return p
+end
+
+function Geo.ClearTarget(say)
+  if Libs() then
+    HBDPins:RemoveAllWorldMapIcons(REF_TARGET)
+    HBDPins:RemoveAllMinimapIcons(REF_TARGET)
+  end
+  if target and target.blizzard and C_Map and C_Map.ClearUserWaypoint then pcall(C_Map.ClearUserWaypoint) end
+  if say and target then ns.Say("waypoint cleared.") end
+  target = nil
+end
+
+-- arrival check for the built-in waypoint
+local arrive = CreateFrame("Frame")
+local arriveElapsed = 0
+arrive:SetScript("OnUpdate", function(_, elapsed)
+  arriveElapsed = arriveElapsed + (elapsed or 0)
+  if arriveElapsed < 1 or not target then return end
+  arriveElapsed = 0
+  if not HBD then return end
+  local x, y, m = HBD:GetPlayerZonePosition()
+  if not (x and m) then return end
+  local d = HBD:GetZoneDistance(m, x, y, target.map, target.x, target.y)
+  if d and d < 25 then
+    ns.Say(("arrived at %s."):format(target.label))
+    Geo.ClearTarget()
+  end
+end)
+
+local function SetTarget(s, label)
+  Geo.ClearTarget()
+  target = { map = s.map, x = s.x, y = s.y, label = label }
+  -- Blizzard's own map pin, where the client supports it
+  if C_Map and C_Map.SetUserWaypoint and UiMapPoint and UiMapPoint.CreateFromCoordinates then
+    local can = not C_Map.CanSetUserWaypointOnMap or C_Map.CanSetUserWaypointOnMap(s.map)
+    if can and pcall(C_Map.SetUserWaypoint, UiMapPoint.CreateFromCoordinates(s.map, s.x, s.y)) then
+      target.blizzard = true
+      if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, true) end
+    end
+  end
+  -- our own marker: world map + minimap (floats on the minimap edge = direction)
+  if Libs() then
+    tWorld = tWorld or TargetPin(20)
+    tMini = tMini or TargetPin(16)
+    HBDPins:AddWorldMapIconMap(REF_TARGET, tWorld, s.map, s.x, s.y, 3)
+    HBDPins:AddMinimapIconMap(REF_TARGET, tMini, s.map, s.x, s.y, true, true)
+  end
+  return true
+end
+
+local function AddWaypoint(s, label)
+  if Geo.HasTomTom() then
+    local ok, uid = pcall(TomTom.AddWaypoint, TomTom, s.map, s.x, s.y, {
+      title = label, persistent = false, minimap = true, world = true, from = "Beast Training Tracker",
+    })
+    if ok and uid then
+      Geo.uids[#Geo.uids + 1] = uid
+      return uid
+    end
+  end
+  return SetTarget(s, label)
+end
+
+function Geo.Waypoint(t, label, quiet)
+  local s, suffix, why = Geo.Destination(t)
+  if not s then
+    if not quiet then ns.Say(why) end
+    return
+  end
+  label = (label or t.name) .. (suffix or "")
+  local res = AddWaypoint(s, label)
+  if res and not quiet then
+    ns.Say(("waypoint set: %s (%.0f, %.0f)%s"):format(label, s.x * 100, s.y * 100,
+      Geo.HasTomTom() and "" or " - follow the marker on your minimap edge"))
+  end
+  return res
+end
+
+-- Several beasts: TomTom gets one waypoint each; built in marks the nearest
 function Geo.WaypointMany(list)
-  local n = 0
+  if Geo.HasTomTom() then
+    local n = 0
+    for _, item in ipairs(list) do
+      if Geo.Waypoint(item.t, item.label, true) then n = n + 1 end
+    end
+    if n > 0 then
+      if TomTom.SetClosestWaypoint then pcall(TomTom.SetClosestWaypoint, TomTom) end
+      ns.Say(("added %d TomTom waypoint%s."):format(n, n == 1 and "" or "s"))
+    else
+      ns.Say("no locations known yet for those beasts.")
+    end
+    return n
+  end
+  local pm, px, py = PlayerPos()
+  local best, bestLabel, bd
   for _, item in ipairs(list) do
-    if Geo.Waypoint(item.t, item.label, true) then n = n + 1 end
+    local s, suffix = Geo.Destination(item.t)
+    if s then
+      local d = (pm and px and s.map == pm) and ((s.x - px) ^ 2 + (s.y - py) ^ 2) or 99
+      if not bd or d < bd then best, bestLabel, bd = s, (item.label or item.t.name) .. (suffix or ""), d end
+    end
   end
-  if n > 0 then
-    if TomTom.SetClosestWaypoint then pcall(TomTom.SetClosestWaypoint, TomTom) end
-    ns.Say(("added %d TomTom waypoint%s."):format(n, n == 1 and "" or "s"))
-  elseif Geo.HasTomTom() then
-    ns.Say("couldn't find coordinates for any of those beasts.")
-  else
-    ns.Say("TomTom isn't loaded, so waypoints aren't available.")
+  if not best then
+    ns.Say("no locations known yet for those beasts.")
+    return 0
   end
-  return n
+  SetTarget(best, bestLabel)
+  ns.Say(("waypoint set to the nearest: %s (%.0f, %.0f) - the rest are pins on your map."):format(bestLabel, best.x * 100, best.y * 100))
+  return 1
 end
 
 function Geo.ClearWaypoints()
@@ -249,6 +464,8 @@ function Geo.ClearWaypoints()
     end
   end
   wipe(Geo.uids)
+  if target then n = n + 1 end
+  Geo.ClearTarget()
   ns.Say(("removed %d waypoint%s."):format(n, n == 1 and "" or "s"))
 end
 
@@ -256,13 +473,13 @@ end
 function Geo.Label(ab, r, t) return ("%s - %s %d"):format(t.name, ab.name, r.rank) end
 
 ------------------------------------------------------------------------
--- Map pins (HereBeDragons, shipped with TomTom)
+-- Map pins (HereBeDragons, bundled)
 ------------------------------------------------------------------------
-local HBDPins
-local REF = "BeastTrainingTracker"
 local worldPool, miniPool = {}, {}
 local worldUsed, miniUsed = {}, {}
 local MAX_WORLD, MAX_PER_TEACHER, MAX_MINI = 900, 25, 120
+
+local SRC_TEXT = { questie = "Questie", seen = "your sightings", rarescanner = "RareScanner", rare = "rare data" }
 
 local function PinEnter(self)
   local tip = GameTooltip
@@ -276,27 +493,26 @@ local function PinEnter(self)
     tip:AddLine(("Teaches %s %d"):format(e.ab.name, e.rank.rank), 0.25, 1, 0.25)
   end
   if d.rareOnly then
-    tip:AddLine("Untamed rare for your collection", 1, 0.5, 0)
+    tip:AddLine("Untamed special pet for your collection", 1, 0.5, 0)
     local info = ns.RS and ns.RS.Info(d.t.name)
     if info then
       tip:AddLine("Attack speed " .. ns.RS.SpeedText(info.speed), 0.8, 0.8, 0.8)
-      for _, tr in ipairs(info.traits) do tip:AddLine(tr.short, 1, 1, 1) end
+      for _, tr in ipairs(info.traits) do if tr.short ~= "" then tip:AddLine(tr.short, 1, 1, 1) end end
     end
   end
+  if self.src and SRC_TEXT[self.src] then tip:AddLine("Location from " .. SRC_TEXT[self.src], 0.5, 0.5, 0.5) end
   tip:AddLine(" ")
-  tip:AddLine("Click: TomTom waypoint", 0.5, 0.5, 0.5)
+  tip:AddLine("Click: waypoint", 0.5, 0.5, 0.5)
   tip:Show()
 end
 
-local function NewPin(pool, size)
+local function NewPin(pool)
   local p = table.remove(pool)
   if p then return p end
   p = CreateFrame("Button", nil, UIParent)
-  p:SetSize(size, size)
   p.border = p:CreateTexture(nil, "BACKGROUND")
   p.border:SetPoint("TOPLEFT", -1, 1)
   p.border:SetPoint("BOTTOMRIGHT", 1, -1)
-  p.border:SetColorTexture(0, 0, 0, 0.85)
   p.tex = p:CreateTexture(nil, "ARTWORK")
   p.tex:SetAllPoints()
   p.tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
@@ -306,13 +522,27 @@ local function NewPin(pool, size)
   p:SetScript("OnClick", function(self)
     local d = self.data
     local e = d.teaches[1]
-    Geo.Waypoint(d.t, e and Geo.Label(e.ab, e.rank, d.t) or (d.t.name .. " (rare)"))
+    Geo.Waypoint(d.t, e and Geo.Label(e.ab, e.rank, d.t) or d.t.name)
   end)
   return p
 end
 
+local function StylePin(p, d, s, icon, rare, size)
+  p:SetSize(size, size)
+  -- orange border = rare, blue = a spot you saw yourself, black = normal
+  if rare then
+    p.border:SetColorTexture(1, 0.5, 0, 0.95)
+  elseif s.src == "seen" then
+    p.border:SetColorTexture(0.25, 0.6, 1, 0.95)
+  else
+    p.border:SetColorTexture(0, 0, 0, 0.85)
+  end
+  p.tex:SetTexture(icon)
+  p.data, p.src = d, s.src
+end
+
 local function ClearPins()
-  if not HBDPins then return end
+  if not Libs() then return end
   HBDPins:RemoveAllWorldMapIcons(REF)
   HBDPins:RemoveAllMinimapIcons(REF)
   for _, p in ipairs(worldUsed) do p:Hide(); worldPool[#worldPool + 1] = p end
@@ -333,7 +563,7 @@ local function TeachersToPin()
       end
     end
   end
-  -- untamed rares you can tame, even if they teach nothing you need
+  -- untamed special pets you can tame, even if they teach nothing you need
   if o.rarePins and ns.RS then
     for _, p in ipairs(ns.rarePets or {}) do
       if not out[p.name] and not ns.db.tamedRares[p.name] and ns.CanTame(p) and (p.rare or not p.dungeon) then
@@ -345,12 +575,9 @@ local function TeachersToPin()
 end
 
 function Geo.UpdatePins()
-  if not ns.db then return end
-  HBDPins = HBDPins or (LibStub and LibStub("HereBeDragons-Pins-2.0", true))
-  if not HBDPins then return end
+  if not ns.db or not Libs() then return end
   ClearPins()
   local o = ns.db.opts
-  -- without QuestieDB only RareScanner's rares have coordinates, which still works
   if o.pinsOff or not (o.mapPins or o.minimapPins) then return end
 
   local pm, px, py = PlayerPos()
@@ -366,11 +593,8 @@ function Geo.UpdatePins()
         local step = math.max(1, math.floor(#info.spawns / MAX_PER_TEACHER))
         for i = 1, #info.spawns, step do
           local s = info.spawns[i]
-          local p = NewPin(worldPool, rare and 16 or 12)
-          p:SetSize(rare and 16 or 12, rare and 16 or 12)
-          p.border:SetColorTexture(rare and 1 or 0, rare and 0.5 or 0, 0, 0.9)
-          p.tex:SetTexture(icon)
-          p.data = d
+          local p = NewPin(worldPool)
+          StylePin(p, d, s, icon, rare, rare and 16 or 12)
           HBDPins:AddWorldMapIconMap(REF, p, s.map, s.x, s.y, 0)
           worldUsed[#worldUsed + 1] = p
           worldCount = worldCount + 1
@@ -391,11 +615,8 @@ function Geo.UpdatePins()
   table.sort(nearby, function(a, b) return a.dist < b.dist end)
   for i = 1, math.min(MAX_MINI, #nearby) do
     local n = nearby[i]
-    local p = NewPin(miniPool, n.rare and 14 or 10)
-    p:SetSize(n.rare and 14 or 10, n.rare and 14 or 10)
-    p.border:SetColorTexture(n.rare and 1 or 0, n.rare and 0.5 or 0, 0, 0.9)
-    p.tex:SetTexture(n.icon)
-    p.data = n.d
+    local p = NewPin(miniPool)
+    StylePin(p, n.d, n.s, n.icon, n.rare, n.rare and 14 or 10)
     HBDPins:AddMinimapIconMap(REF, p, n.s.map, n.s.x, n.s.y, false, false)
     miniUsed[#miniUsed + 1] = p
   end
@@ -409,7 +630,7 @@ function Geo.QueuePins(force)
   local o = ns.db.opts
   local sig = table.concat({ ns.learnedSerial or 0, ns.PlayerLevel(), ns.CurrentZone(), tostring(o.mapPins),
     tostring(o.minimapPins), tostring(o.huntPetOnly), tostring(o.huntDungeons), tostring(Geo.ready), ns.PetFamily() or "",
-    tostring(o.pinsOff), tostring(o.rarePins), tostring(ns.tamedSerial or 0) }, "|")
+    tostring(o.pinsOff), tostring(o.rarePins), tostring(ns.tamedSerial or 0), tostring(ns.seenSerial or 0) }, "|")
   if sig == lastSig and not force then return end
   lastSig = sig
   if queued then return end
@@ -429,21 +650,49 @@ function Geo.TogglePins()
 end
 
 ------------------------------------------------------------------------
--- Startup: build QuestieDB's name index spread over several frames
+-- Status of optional addons (for the UI)
 ------------------------------------------------------------------------
-function Geo.StatusText()
-  local s = Geo.ready and ("QuestieDB ready, %d beasts located so far"):format(Geo.located) or Geo.status
-  local rsCount = 0
-  for _ in pairs(ns.rareIds or ns.rsRares or {}) do rsCount = rsCount + 1 end
-  return s .. (Geo.HasTomTom() and "  |  TomTom loaded" or "  |  TomTom not loaded")
-    .. ((ns.RS and ns.RS.Loaded()) and ("  |  RareScanner linked (%d rare teachers)"):format(rsCount) or "  |  RareScanner not loaded")
+-- { {name=, on=, text=}, ... }
+function Geo.AddonStatus()
+  local seen = Geo.SeenCount()
+  local q
+  if Geo.HasQuestie() then
+    q = Geo.ready and ("Spawn locations for every beast (%d looked up so far)"):format(Geo.LocatedCount())
+      or "Loading beast locations..."
+  else
+    q = ("Not detected - map pins use the %d beast%s you've spotted yourself. Install Questie for every spawn.")
+      :format(seen, seen == 1 and "" or "s")
+  end
+  return {
+    { name = "Questie", on = Geo.HasQuestie(), text = q },
+    { name = "TomTom", on = Geo.HasTomTom(), text = Geo.HasTomTom() and "Waypoint arrows"
+      or "Not detected - waypoints use a built-in map pin and minimap marker instead." },
+    { name = "RareScanner", on = Geo.HasRareScanner(), text = Geo.HasRareScanner()
+      and "Live rare timers and last-seen spots" or "Not detected - install it for live rare spawn timers." },
+  }
 end
 
+function Geo.StatusText()
+  local parts = {}
+  for _, a in ipairs(Geo.AddonStatus()) do parts[#parts + 1] = a.name .. ": " .. a.text end
+  return table.concat(parts, "  |  ")
+end
+
+------------------------------------------------------------------------
+-- Startup
+------------------------------------------------------------------------
+ns.OnInit(function()
+  BeastTrainingTrackerSeen = BeastTrainingTrackerSeen or {}
+  Geo.seen = BeastTrainingTrackerSeen
+end)
+
 ns.OnLogin(function()
-  if not (_G.NpcDB and NpcDB.IdsByName and NpcDB.Get) then
-    Geo.status = "QuestieDB not found - map pins and waypoints need it"
+  Libs()
+  if not Geo.HasQuestie() then
+    Geo.status = "Questie not installed"
     return
   end
+  -- build QuestieDB's name index spread over several frames
   Geo.status = "loading beast locations..."
   local co = coroutine.create(function()
     if NpcDB.BuildNameIndexAsync then NpcDB.BuildNameIndexAsync(400) else NpcDB.BuildNameIndex() end
@@ -460,12 +709,25 @@ ns.OnLogin(function()
       self:SetScript("OnUpdate", nil)
       Geo.ready = true
       Geo.status = "ready"
+      wipe(qcache)
       ns.Refresh()
     end
   end)
 end)
 
 local zev = CreateFrame("Frame")
-zev:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-zev:RegisterEvent("PLAYER_ENTERING_WORLD")
-zev:SetScript("OnEvent", function() if Geo.ready then Geo.QueuePins(true) end end)
+for _, e in ipairs({ "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD", "NAME_PLATE_UNIT_ADDED",
+  "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT" }) do
+  pcall(zev.RegisterEvent, zev, e)
+end
+zev:SetScript("OnEvent", function(_, e, unit)
+  if e == "NAME_PLATE_UNIT_ADDED" then
+    if unit then Geo.RecordSighting(unit) end
+  elseif e == "PLAYER_TARGET_CHANGED" then
+    Geo.RecordSighting("target")
+  elseif e == "UPDATE_MOUSEOVER_UNIT" then
+    Geo.RecordSighting("mouseover")
+  else
+    Geo.QueuePins(true)
+  end
+end)

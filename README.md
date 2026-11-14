@@ -1,6 +1,8 @@
 # Beast Training Tracker
 
-A hunter addon for WoW Forever that tracks your pet ability ranks, shows which beasts teach the ones you're missing, and keeps a collection list of rare, elite and quest-spawned pets.
+A hunter addon for WoW Forever. It tracks your pet ability ranks, shows which beasts teach the ones you're missing, and keeps a collection list of rare, elite and quest-spawned pets.
+
+**It works fully on its own.** Questie, TomTom and RareScanner each add extras if you have them installed.
 
 ## Features
 
@@ -8,18 +10,21 @@ A hunter addon for WoW Forever that tracks your pet ability ranks, shows which b
 - **Hunt Planner:** the zones where you can tame the most missing ranks at your level.
 - **Special Pets:** rare, elite and quest-spawned pets, with attack speed, unique looks, and a tamed checklist that tracks renamed pets.
 - **My Pet:** upgrades you can teach, and ranks coming up as your pet levels.
-- **Map pins and alerts:** beast locations on the world map and minimap, a popup when a beast that teaches something you need is nearby, and a popup when you learn a new ability.
+- **Map pins and waypoints:** beast locations on the world map and minimap. Click a pin for a waypoint.
+- **Alerts:** a popup when a beast that teaches something you need is nearby, and a popup when you learn a new ability.
 - **Zone tracker:** a small panel listing what you can tame in your current zone.
 - **Backup:** export and import your learned ranks and tamed pets as text.
 - **Minimap button:** works with minimap-button collector addons. Left-click opens the window, right-click shows or hides map pins, and middle-click toggles the tracker.
 
-## Optional addons
+## Works on its own, better with friends
 
-None of these are required, but each one adds features:
+The window header shows which optional addons are detected: green if found, grey if not. Hover it for details; click it to open **Settings**.
 
-- **QuestieDB:** beast spawn locations for map pins and waypoints.
-- **TomTom:** waypoint arrows.
-- **RareScanner:** live rare timers ("should be up", "back in ~30m", "seen 3h ago").
+| Addon | Without it | With it |
+|---|---|---|
+| **Questie** | Map pins show every beast you've spotted yourself (targeted, moused over or nameplate seen). These are remembered across all your characters. | Spawn locations for every beast, before you've seen them |
+| **TomTom** | Waypoints use a built-in map pin and a minimap marker that points the way | TomTom's arrow |
+| **RareScanner** | Rare pets are listed with their zone | Live rare timers ("should be up", "back in ~30m", "seen 3h ago") and waypoints to where a rare was last seen |
 
 ## Commands
 
@@ -28,11 +33,10 @@ None of these are required, but each one adds features:
 ## Credits
 
 - Pet ability, rare, elite and attack speed data from [Petopia](https://www.wow-petopia.com/forever/).
-- Uses LibStub, CallbackHandler-1.0, LibDataBroker-1.1 and LibDBIcon-1.0.
+- Uses LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0 and HereBeDragons.
 
-## Releasing
+## Development
 
-Pushing a tag (for example `v1.3.0`) runs the BigWigs packager through GitHub Actions and uploads the new version to CurseForge. A tag containing `alpha` or `beta` is uploaded as an alpha or beta release. This needs:
-
-- the `CF_API_KEY` repository secret, and
-- `## X-Curse-Project-ID` set in the TOC file.
+- Run the unit tests from the addon folder: `lua5.1 tests/run.lua`. They also run on GitHub on every push.
+- **Releasing:** push a tag (for example `v1.3.0`). GitHub Actions then tests, packages and uploads the new version to CurseForge with the BigWigs packager. A tag containing `alpha` or `beta` is uploaded as an alpha or beta release.
+- This needs the `CF_API_KEY` repository secret, and `## X-Curse-Project-ID` set in the TOC.

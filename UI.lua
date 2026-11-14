@@ -4,7 +4,7 @@ local abilities = ns.abilities
 local Geo = ns.Geo
 local Say = ns.Say
 
-local WIDTH, HEIGHT = 780, 620
+local WIDTH, HEIGHT = 780, 630
 local LIST_W = WIDTH - 16 - 28
 local HEAD_H, ROW_H = 26, 18
 local GREEN, GOLD = "|cff40ff40", "|cffffd100"
@@ -63,6 +63,38 @@ barText:SetPoint("CENTER")
 local syncText = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 syncText:SetPoint("TOPRIGHT", bar, "BOTTOMRIGHT", 0, -6)
 syncText:SetJustifyH("RIGHT")
+
+-- Optional addon indicators (green = detected). Click to open Settings.
+local addonStrip = CreateFrame("Button", nil, f)
+addonStrip:SetHeight(14)
+addonStrip:SetPoint("TOPLEFT", zoneText, "BOTTOMLEFT", 0, -4)
+addonStrip.text = addonStrip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+addonStrip.text:SetPoint("LEFT")
+addonStrip:SetScript("OnEnter", function(self)
+  GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
+  GameTooltip:AddLine("Optional addons", 1, 0.82, 0)
+  GameTooltip:AddLine("Beast Training Tracker works on its own. These add extras:", 0.8, 0.8, 0.8, true)
+  GameTooltip:AddLine(" ")
+  for _, a in ipairs(ns.Geo.AddonStatus()) do
+    GameTooltip:AddLine((a.on and "|cff40ff40" or "|cff9d9d9d") .. a.name .. "|r", 1, 1, 1)
+    GameTooltip:AddLine(a.text, 0.75, 0.75, 0.75, true)
+  end
+  GameTooltip:AddLine(" ")
+  GameTooltip:AddLine("Click for Settings", 0.5, 0.5, 0.5)
+  GameTooltip:Show()
+end)
+addonStrip:SetScript("OnLeave", GameTooltip_Hide)
+addonStrip:SetScript("OnClick", function() if ns.ShowTab then ns.ShowTab(ns.TAB.map) end end)
+
+local function UpdateAddonStrip()
+  local parts = {}
+  for _, a in ipairs(ns.Geo.AddonStatus()) do
+    parts[#parts + 1] = ("|TInterface\\COMMON\\Indicator-%s:12:12|t%s%s|r"):format(a.on and "Green" or "Gray",
+      a.on and "|cff40ff40" or "|cff9d9d9d", a.name)
+  end
+  addonStrip.text:SetText(table.concat(parts, "   "))
+  addonStrip:SetWidth(addonStrip.text:GetStringWidth() + 4)
+end
 
 ------------------------------------------------------------------------
 -- "Beast Training" button (secure: casts the spell that opens the window).
@@ -344,7 +376,7 @@ end
 ------------------------------------------------------------------------
 -- Tabs
 ------------------------------------------------------------------------
-local TAB_NAMES = { "Abilities", "Hunt Planner", "Special Pets", "My Pet", "Map & Alerts", "Backup" }
+local TAB_NAMES = { "Abilities", "Hunt Planner", "Special Pets", "My Pet", "Settings", "Backup" }
 ns.TAB = { abilities = 1, hunt = 2, rares = 3, pet = 4, map = 5, backup = 6 }
 local tabs, panels = {}, {}
 
@@ -363,7 +395,7 @@ end
 for i, name in ipairs(TAB_NAMES) do
   local b = CreateFrame("Button", nil, f)
   b:SetSize(120, 24)
-  b:SetPoint("TOPLEFT", 12 + (i - 1) * 124, -84)
+  b:SetPoint("TOPLEFT", 12 + (i - 1) * 124, -94)
   b.bg = b:CreateTexture(nil, "BACKGROUND")
   b.bg:SetAllPoints()
   b.accent = C(0.67, 0.83, 0.45, 0.9, b:CreateTexture(nil, "ARTWORK"))
@@ -380,12 +412,12 @@ for i, name in ipairs(TAB_NAMES) do
   tabs[i] = b
 
   local p = CreateFrame("Frame", nil, f)
-  p:SetPoint("TOPLEFT", 8, -114)
+  p:SetPoint("TOPLEFT", 8, -124)
   p:SetPoint("BOTTOMRIGHT", -8, 8)
   p:Hide()
   panels[i] = p
 end
-Divider(f, -109)
+Divider(f, -119)
 
 local function CurrentTab() return (ns.db and ns.db.tab) or 1 end
 
@@ -404,6 +436,7 @@ local function RefreshAll()
   local known, total = ns.Counts()
   bar:SetValue(total > 0 and known / total or 0)
   barText:SetText(("%d / %d ranks learned  (%d%%)"):format(known, total, total > 0 and math.floor(known / total * 100 + 0.5) or 0))
+  UpdateAddonStrip()
   syncText:SetText(ns.db.lastSync and ("Last Beast Training sync: " .. date("%b %d, %H:%M", ns.db.lastSync))
     or "Open Beast Training once to sync what you've learned")
 
@@ -495,7 +528,7 @@ do
 
   local footer = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   footer:SetPoint("BOTTOMLEFT", 6, 4)
-  footer:SetText("Click a rank: TomTom waypoint to a teacher  ·  Shift-click: waypoints to all teachers  ·  Click an ability to collapse")
+  footer:SetText("Click a rank: waypoint to a teacher  ·  Shift-click: waypoints to all teachers  ·  Click an ability to collapse")
 
   local rows = {}
 
@@ -833,7 +866,7 @@ do
           tt:AddLine(z.zone, 1, 0.82, 0)
           for _, e in ipairs(z.entries) do tt:AddLine(("%s %d"):format(e.ab.name, e.rank.rank), 1, 1, 1) end
           tt:AddLine(" ")
-          tt:AddLine("Waypoints: add TomTom waypoints to these beasts", 0.5, 0.5, 0.5)
+          tt:AddLine("Waypoints: mark these beasts (TomTom arrows if installed)", 0.5, 0.5, 0.5)
         end,
       }
       for _, e in ipairs(z.entries) do
@@ -1100,53 +1133,69 @@ do
 end
 
 ------------------------------------------------------------------------
--- Tab 4: Map & Alerts
+-- Tab 5: Settings (optional addons, map, alerts, tracker, minimap)
 ------------------------------------------------------------------------
 local mmCheck
 do
   local p = panels[ns.TAB.map]
-  local y = -4
+  local y = -2
   local function Section(text)
     local fs = Text(p, "GameFontNormal", 6, y, text)
     Divider(p, y - 16)
-    y = y - 24
+    y = y - 22
     return fs
   end
+
+  -- Optional addons: green = detected, grey = not installed
+  Section("Optional addons  |cff9d9d9d- Beast Training Tracker works on its own; these add extras|r")
+  local addonRows = {}
+  for i = 1, 3 do
+    local r = {}
+    r.dot = p:CreateTexture(nil, "ARTWORK")
+    r.dot:SetSize(12, 12)
+    r.dot:SetPoint("TOPLEFT", 10, y - 2)
+    r.name = Text(p, "GameFontHighlight", 28, y)
+    r.text = Text(p, "GameFontHighlightSmall", 130, y - 1)
+    r.text:SetWidth(WIDTH - 180)
+    r.text:SetWordWrap(false)
+    addonRows[i] = r
+    y = y - 18
+  end
+  y = y - 8
 
   Section("Map pins")
   Check(p, "Show teachers on the world map", "mapPins", 4, y, "Pins for every beast that teaches a missing rank you can tame now. Click a pin for a waypoint.")
   Check(p, "Show teachers on the minimap", "minimapPins", 300, y, "Pins on the minimap for the nearest teachers in your zone.")
-  y = y - 26
+  y = y - 24
   Check(p, "Hide ALL beast pins", "pinsOff", 4, y, "Master switch for every pin this addon draws. Same as right-clicking the minimap button.",
     function() Geo.QueuePins(true) end)
-  Check(p, "Show untamed rares on the map", "rarePins", 300, y, "Pins for untamed rares you can tame, even if they teach nothing you need.")
+  Check(p, "Show untamed special pets on the map", "rarePins", 300, y, "Pins for untamed rares (and outdoor elites / quest spawns) you can tame, even if they teach nothing you need.")
   y = y - 30
 
   Section("Alerts")
   Check(p, "Alert when I target or mouse over a teacher", "alertTarget", 4, y, "Big on-screen message when a beast you can tame teaches something you need.")
   Check(p, "Alert when a teacher's nameplate appears", "alertNameplate", 300, y, "Same alert as soon as a teacher's nameplate shows up nearby (needs enemy nameplates on).")
-  y = y - 26
+  y = y - 24
   Check(p, "Play a sound with alerts", "alertSound", 4, y, "Raid-warning sound when an alert fires.")
   Check(p, "Remind me about pet upgrades", "upgradeAlert", 300, y, "Chat reminder when you know a better rank than your pet has.")
-  y = y - 26
+  y = y - 24
   Check(p, "Pet level-up nudges", "levelNudge", 4, y, "Chat message when your pet reaches the level for a new rank.")
   Check(p, "Let RareScanner alert for rares", "rsHandlesRares", 300, y,
-    "RareScanner already pops an alert for rares on its list. With this on, Beast Training Tracker skips its own alert for those so you don't get two.")
-  y = y - 26
+    "If RareScanner is installed it already alerts for rares on its list. With this on, Beast Training Tracker skips its own alert for those so you don't get two.")
+  y = y - 24
   Check(p, "Popup when I learn a new ability", "learnToast", 4, y,
     "On-screen popup (with sound) whenever a new pet ability rank is learned - e.g. from a beast you just tamed.")
-  y = y - 34
+  y = y - 30
 
   Section("Zone tracker")
   Check(p, "Show the zone tracker", "tracker", 4, y, "Small movable panel listing what you can tame in your current zone. Click a line for a waypoint.")
   Check(p, "Hide it when there's nothing to tame", "trackerAutoHide", 300, y, "Only show the tracker in zones with something new for you.")
-  y = y - 30
   local resetPos = Button(p, "Reset tracker position", 160, function()
     ns.db.trackerPos = nil
     if ns.PlaceTracker then ns.PlaceTracker() end
   end)
-  resetPos:SetPoint("TOPLEFT", 8, y)
-  y = y - 38
+  resetPos:SetPoint("TOPRIGHT", -8, y)
+  y = y - 30
 
   Section("Minimap button & waypoints")
   mmCheck = CreateFrame("CheckButton", nil, p, "UICheckButtonTemplate")
@@ -1156,19 +1205,20 @@ do
   mmText:SetFontObject("GameFontHighlightSmall")
   mmText:ClearAllPoints()
   mmText:SetPoint("LEFT", mmCheck, "RIGHT", 2, 0)
-  mmText:SetText("Show minimap button (works with One For All)")
+  mmText:SetText("Show minimap button (works with minimap button collectors)")
   mmCheck:SetScript("OnClick", function() if ns.ToggleMinimapButton then ns.ToggleMinimapButton() end end)
-  local clear = Button(p, "Clear my TomTom waypoints", 190, function() Geo.ClearWaypoints() end)
+  local clear = Button(p, "Clear waypoints", 140, function() Geo.ClearWaypoints() end)
   clear:SetPoint("TOPLEFT", 300, y)
-  y = y - 40
-
-  local status = Text(p, "GameFontDisableSmall", 8, y)
-  status:SetWidth(WIDTH - 40)
 
   function p.Refresh()
     if not p:IsShown() then return end
     mmCheck:SetChecked(not ns.db.minimap.hide)
-    status:SetText("Beast locations: " .. Geo.StatusText())
+    for i, a in ipairs(Geo.AddonStatus()) do
+      local r = addonRows[i]
+      r.dot:SetTexture(a.on and "Interface\\COMMON\\Indicator-Green" or "Interface\\COMMON\\Indicator-Gray")
+      r.name:SetText(a.on and ("|cff40ff40" .. a.name .. "|r") or ("|cff9d9d9d" .. a.name .. "|r"))
+      r.text:SetText(a.on and a.text or ("|cff9d9d9d" .. a.text .. "|r"))
+    end
   end
   p:SetScript("OnShow", p.Refresh)
 end

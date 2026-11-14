@@ -41,7 +41,7 @@ close:SetSize(20, 20)
 close:SetPoint("TOPRIGHT", -2, -2)
 close:SetScript("OnClick", function()
   ns.db.opts.tracker = false
-  ns.Say("zone tracker hidden. Turn it back on in Map & Alerts, or /btt tracker.")
+  ns.Say("zone tracker hidden. Turn it back on in Settings, or /btt tracker.")
   ns.Refresh()
 end)
 

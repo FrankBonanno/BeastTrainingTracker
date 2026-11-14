@@ -74,12 +74,14 @@ function H.load(opts)
     zone = "Durotar",
     pet = nil,       -- { name=, family=, level=, guid=, spells = { {"Bite","Rank 2"}, ... } }
     trainer = nil,   -- { {"Bite","Rank 1","available"}, ... }
+    units = {},      -- other units: units.target = { name = "Prairie Wolf" }
   }
   local S = H.state
 
   -- saved variables
   BeastTrainingTrackerDB = nil
   BeastTrainingTrackerBackup = opts.backup
+  BeastTrainingTrackerSeen = opts.seen
 
   -- globals the addon touches
   SlashCmdList, StaticPopupDialogs = {}, {}
@@ -113,7 +115,10 @@ function H.load(opts)
   UnitName = function(u)
     if u == "player" then return "Tester" end
     if u == "pet" and S.pet then return S.pet.name end
+    if S.units[u] then return S.units[u].name end
   end
+  UnitPlayerControlled = function(u) return u == "player" or u == "pet" end
+  UnitIsDead = function() return false end
   UnitLevel = function(u)
     if u == "player" then return S.level end
     if u == "pet" and S.pet then return S.pet.level end
@@ -121,7 +126,7 @@ function H.load(opts)
   UnitExists = function(u)
     if u == "player" then return true end
     if u == "pet" then return S.pet ~= nil end
-    return false
+    return S.units[u] ~= nil
   end
   UnitCreatureFamily = function(u) if u == "pet" and S.pet then return S.pet.family end end
   UnitGUID = function(u) if u == "pet" and S.pet then return S.pet.guid end end
@@ -142,6 +147,7 @@ function H.load(opts)
   -- things the logic files check for and must find missing
   C_SpellBook, Enum, C_AddOns, C_Map, LibStub, TomTom, NpcDB, LibQuestieDB = nil, nil, nil, nil, nil, nil, nil, nil
   RareScannerDB, ClassTrainerFrame, GetNumCrafts, GetCraftInfo, QuestieLoader = nil, nil, nil, nil, nil
+  UiMapPoint, C_SuperTrack = nil, nil
 
   local ns = {}
   for _, file in ipairs(LOGIC_FILES) do
@@ -151,6 +157,22 @@ function H.load(opts)
   H.ns = ns
   H.fire("ADDON_LOADED", "BeastTrainingTracker")
   return ns
+end
+
+-- Put the player somewhere on a map (enables C_Map position lookups)
+function H.setPosition(map, x, y)
+  C_Map = {
+    GetBestMapForUnit = function() return map end,
+    GetPlayerMapPosition = function() return { GetXY = function() return x, y end } end,
+  }
+end
+
+-- Did any chat line contain this text?
+function H.said(text)
+  for _, line in ipairs(H.printed) do
+    if line:find(text, 1, true) then return true end
+  end
+  return false
 end
 
 return H

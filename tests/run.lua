@@ -343,6 +343,89 @@ test("RareScanner missing: no timers, no errors", function()
 end)
 
 ------------------------------------------------------------------------
+-- Standalone: no Questie / TomTom / RareScanner
+------------------------------------------------------------------------
+test("standalone: optional addons all report 'not detected'", function()
+  local ns = H.load()
+  local st = ns.Geo.AddonStatus()
+  eq(#st, 3)
+  for _, a in ipairs(st) do
+    eq(a.on, false, a.name .. " should be missing")
+    has(a.text, "Not detected", a.name .. " text")
+  end
+end)
+
+test("standalone: spotting a teacher records its location", function()
+  local ns = H.load()
+  H.setPosition(1412, 0.5, 0.6)
+  H.state.units.target = { name = "Prairie Wolf" }
+  H.fire("PLAYER_TARGET_CHANGED")
+  local spots = BeastTrainingTrackerSeen["Prairie Wolf"]
+  ok(spots and #spots == 1, "sighting not saved")
+  eq(spots[1][1], 1412) eq(spots[1][2], 0.5) eq(spots[1][3], 0.6)
+
+  local info = ns.Geo.Lookup("Prairie Wolf")
+  ok(info and #info.spawns == 1, "lookup didn't use the sighting")
+  eq(info.spawns[1].src, "seen")
+  eq(ns.Geo.SeenCount(), 1)
+end)
+
+test("standalone: untracked mobs and players aren't recorded", function()
+  H.load()
+  H.setPosition(1412, 0.5, 0.6)
+  H.state.units.target = { name = "Kobold Vermin" }
+  H.fire("PLAYER_TARGET_CHANGED")
+  eq(BeastTrainingTrackerSeen["Kobold Vermin"], nil, "random mob recorded")
+end)
+
+test("standalone: sightings are account-wide and survive a reload", function()
+  local ns = H.load()
+  H.setPosition(1412, 0.25, 0.75)
+  H.state.units.mouseover = { name = "The Rake" }
+  H.fire("UPDATE_MOUSEOVER_UNIT")
+  local seen = H.deepcopy(BeastTrainingTrackerSeen)
+  local ns2 = H.load({ seen = seen })
+  local info = ns2.Geo.Lookup("The Rake")
+  ok(info and info.spawns[1] and info.spawns[1].x == 0.25, "sighting lost after reload")
+end)
+
+test("standalone: waypoint without TomTom uses the built-in marker", function()
+  local ns = H.load()
+  H.setPosition(1412, 0.5, 0.6)
+  H.state.units.target = { name = "Prairie Wolf" }
+  H.fire("PLAYER_TARGET_CHANGED")
+  local res = ns.Geo.Waypoint({ name = "Prairie Wolf", zone = "Mulgore" }, "Prairie Wolf - Bite 1")
+  ok(res, "no waypoint set")
+  ok(H.said("waypoint set: Prairie Wolf - Bite 1"), "no confirmation message")
+  ok(H.said("minimap edge"), "should point to the minimap marker")
+end)
+
+test("standalone: unknown location explains how to get one", function()
+  local ns = H.load()
+  local s, _, why = ns.Geo.Destination({ name = "Prairie Wolf", zone = "Mulgore" })
+  eq(s, nil)
+  has(why, "Mulgore")
+  has(why, "Questie")
+  ok(not ns.Geo.Waypoint({ name = "Prairie Wolf", zone = "Mulgore" }), "waypoint set with no location")
+end)
+
+test("with TomTom: waypoints go to TomTom", function()
+  local ns = H.load()
+  local added = {}
+  TomTom = { AddWaypoint = function(_, m, x, y, o) added[#added + 1] = { m, x, y, o.title } return { id = #added } end,
+    RemoveWaypoint = function() end }
+  H.setPosition(1412, 0.5, 0.6)
+  H.state.units.target = { name = "Prairie Wolf" }
+  H.fire("PLAYER_TARGET_CHANGED")
+  ok(ns.Geo.Waypoint({ name = "Prairie Wolf", zone = "Mulgore" }, "Wolf"), "no waypoint")
+  eq(#added, 1, "TomTom not used")
+  eq(added[1][1], 1412)
+  local st = ns.Geo.AddonStatus()
+  eq(st[2].name, "TomTom") eq(st[2].on, true)
+  TomTom = nil
+end)
+
+------------------------------------------------------------------------
 -- Runner
 ------------------------------------------------------------------------
 local failed = 0

@@ -1,17 +1,19 @@
 ## Interface: 16001
 ## Title: Beast Training Tracker
-## Notes: Tracks which pet ability ranks you've learned, which beasts teach the rest, and rare / elite pets to collect. Data from Petopia.
+## Notes: Tracks which pet ability ranks you've learned, which beasts teach the rest, and rare / elite pets to collect. Works on its own; Questie, TomTom and RareScanner add extras.
 ## Author: Socks
 ## Version: @project-version@
 ## SavedVariablesPerCharacter: BeastTrainingTrackerDB
-## SavedVariables: BeastTrainingTrackerBackup
-## OptionalDeps: LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0, QuestieDB, TomTom, RareScanner
+## SavedVariables: BeastTrainingTrackerBackup, BeastTrainingTrackerSeen
+## OptionalDeps: LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0, HereBeDragons, QuestieDB, Questie, TomTom, RareScanner
 ## IconTexture: Interface\Icons\Ability_Hunter_BeastTraining
 
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
 Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
 Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+Libs\HereBeDragons\HereBeDragons-2.0.lua
+Libs\HereBeDragons\HereBeDragons-Pins-2.0.lua
 
 Data.lua
 RarePets.lua
