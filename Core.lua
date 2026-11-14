@@ -703,8 +703,9 @@ SlashCmdList.BEASTTRAININGTRACKER = function(msg)
     ns.db.opts.tracker = not ns.db.opts.tracker
     Say("zone tracker " .. (ns.db.opts.tracker and "shown" or "hidden"))
     ns.Refresh()
-  elseif msg == "hunt" or msg == "pet" or msg == "map" or msg == "backup" or msg == "export" or msg == "import" or msg == "rarepets" then
-    local key = ({ export = "backup", import = "backup", rarepets = "rares" })[msg] or msg
+  elseif msg == "hunt" or msg == "pet" or msg == "map" or msg == "settings" or msg == "backup" or msg == "export"
+    or msg == "import" or msg == "rarepets" or msg == "abilities" then
+    local key = ({ export = "backup", import = "backup", rarepets = "rares", settings = "map" })[msg] or msg
     if ns.ShowTab and ns.TAB then ns.ShowTab(ns.TAB[key]) end
   elseif msg == "petinfo" then
     if ns.RS then ns.RS.PetInfo() end
@@ -736,7 +737,7 @@ SlashCmdList.BEASTTRAININGTRACKER = function(msg)
     dbgFrame:UnregisterAllEvents()
     P("debug off")
   elseif msg == "help" then
-    Say("/btt - toggle window   /btt hunt | rarepets | pet | map | backup - open a tab")
+    Say("/btt - toggle window   /btt abilities | hunt | rarepets | pet | settings | backup - open a tab")
     Say("/btt pins - show/hide all beast pins on the map (same as minimap right-click)")
     Say("/btt tracker - show/hide the zone tracker   /btt minimap - show/hide minimap button")
     Say("/btt clearwp - remove waypoints this addon added   /btt status - saved data info")
