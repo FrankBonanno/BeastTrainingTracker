@@ -1,6 +1,11 @@
 # BigWigs packager config: https://github.com/BigWigsMods/packager
 package-as: BeastTrainingTracker
 
+# Upload the hand-written changelog instead of raw commit messages
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
 ignore:
   - README.md
   - tests       # unit tests - development only

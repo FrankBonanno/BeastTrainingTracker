@@ -40,3 +40,5 @@ The window header shows which optional addons are detected: green if found, grey
 - Run the unit tests from the addon folder: `lua5.1 tests/run.lua`. They also run on GitHub on every push.
 - **Releasing:** push a tag (for example `v1.3.0`). GitHub Actions then tests, packages and uploads the new version to CurseForge with the BigWigs packager. A tag containing `alpha` or `beta` is uploaded as an alpha or beta release.
 - This needs the `CF_API_KEY` repository secret, and `## X-Curse-Project-ID` set in the TOC.
+- **Changelog:** add player-facing notes to `CHANGELOG.md` ([Keep a Changelog](https://keepachangelog.com) format) before tagging. The packager uploads it as the CurseForge changelog.
+- **Commit messages** follow [Conventional Commits](https://www.conventionalcommits.org): `feat:`, `fix:`, `docs:`, `test:`, `ci:`, `build:`, `refactor:`, `chore:`.
