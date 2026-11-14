@@ -504,6 +504,71 @@ test("route: dotted line color has a visible default and can be changed", functi
   ns.Geo.DrawRoute() -- no map library loaded: must not error
 end)
 
+-- two different beasts that each teach exactly one rank, the same one
+local function SameRankPair(ns)
+  for _, ab in ipairs(ns.abilities) do
+    for _, r in ipairs(ab.parsed) do
+      local solo = {}
+      for _, t in ipairs(r.teachers) do
+        local entries = ns.teacherIndex[t.name]
+        if #entries == 1 and not ns.rarePetByName[t.name] and solo[#solo] ~= t.name then solo[#solo + 1] = t.name end
+      end
+      if #solo >= 2 then return ab, r, solo[1], solo[2] end
+    end
+  end
+end
+
+test("route: only one mob per ability, the nearest in route order", function()
+  local ns = H.load()
+  local ab, r, a, b = SameRankPair(ns)
+  ok(a and b, "data has no two beasts teaching the same single rank")
+  spot(a, 1412, 0.2, 0.2)
+  spot(b, 1412, 0.8, 0.8)
+  H.setPosition(1412, 0.1, 0.1)
+  local n = ns.Geo.WaypointMany({
+    { t = { name = b, zone = "?" }, label = b },
+    { t = { name = a, zone = "?" }, label = a },
+  })
+  eq(n, 1, ("%s and %s both teach %s %d - only one stop expected"):format(a, b, ab.name, r.rank))
+  eq(ns.Geo.route[1].label, a, "the nearer beast should be kept")
+
+  -- clicking the other one by hand still adds it
+  ns.Geo.Waypoint({ name = b, zone = "?" }, b)
+  eq(#ns.Geo.route, 2, "clicked stops are always kept")
+end)
+
+test("route: learning a rank or taming a pet drops stops you no longer need", function()
+  local ns = H.load()
+  local ab, r, a = SameRankPair(ns)
+  spot(a, 1412, 0.2, 0.2)
+  spot("The Rake", 1412, 0.5, 0.5)
+  H.setPosition(1412, 0.1, 0.1)
+  ns.Geo.WaypointMany({
+    { t = { name = a, zone = "?" }, label = a },
+    { t = { name = "The Rake", zone = "Mulgore" }, label = "The Rake" },
+  })
+  eq(#ns.Geo.route, 2)
+
+  H.fire("CHAT_MSG_SYSTEM", ("You have learned a new ability: %s (Rank %d)."):format(ab.name, r.rank))
+  eq(#ns.Geo.route, 1, "teacher stop not removed after learning")
+  eq(ns.Geo.route[1].label, "The Rake")
+  ok(H.said("route updated"), "no route update message")
+
+  ns.RS.SetTamed("The Rake", true)
+  eq(#ns.Geo.route, 0, "pet stop not removed after taming")
+  ok(H.said("hunt route complete"), "no completion message")
+end)
+
+test("route: plain stops are never pruned", function()
+  local ns = H.load()
+  local ab, r, a = SameRankPair(ns)
+  ns.db.known[ns.Key(ab.name, r.rank)] = true -- already learned before clicking
+  spot(a, 1412, 0.2, 0.2)
+  ns.Geo.Waypoint({ name = a, zone = "?" }, a)
+  H.fire("CHAT_MSG_SYSTEM", "You have learned a new ability: Dash (Rank 1).")
+  eq(#ns.Geo.route, 1, "a stop with nothing left to learn was added on purpose and should stay")
+end)
+
 test("route: TomTom gets one waypoint per stop", function()
   local ns = H.load()
   local added, removed = 0, 0

@@ -335,13 +335,50 @@ end
 
 local function Opt(key) return ns.db and ns.db.opts[key] end
 
--- Nearest-neighbour order, starting from the player
+-- What a route stop is for: the ranks its beast teaches that you still need,
+-- and the special pet it is (if untamed). Stops with neither are kept as-is.
+function Geo.MakeStop(spot, label, beast, manual)
+  local stop = { map = spot.map, x = spot.x, y = spot.y, label = label, beast = beast, manual = manual, teaches = {} }
+  for _, e in ipairs(beast and ns.teacherIndex[beast] or {}) do
+    if not ns.IsKnown(e.ab, e.rank.rank) then
+      stop.teaches[#stop.teaches + 1] = { ab = e.ab, rank = e.rank }
+    end
+  end
+  if beast and ns.rarePetByName and ns.rarePetByName[beast] and not (ns.db and ns.db.tamedRares[beast]) then
+    stop.pet = beast
+  end
+  return stop
+end
+
+local function StopKeys(s)
+  local keys = {}
+  for _, e in ipairs(s.teaches or {}) do keys[#keys + 1] = ns.Key(e.ab.name, e.rank.rank) end
+  return keys
+end
+
+-- Nearest-neighbour order, starting from the player. A stop is only added
+-- if it teaches something no earlier stop covers (one mob per ability);
+-- clicked stops, special pets and plain stops are always kept.
 function Geo.OrderStops(stops)
   local pm, px, py = PlayerPos()
-  local left, out = {}, {}
+  local left, out, covered = {}, {}, {}
   for i, s in ipairs(stops) do left[i] = s end
+
+  local function Useful(s)
+    if s.manual or s.pet or not s.teaches or #s.teaches == 0 then return true end
+    for _, k in ipairs(StopKeys(s)) do
+      if not covered[k] then return true end
+    end
+    return false
+  end
+
   local cm, cx, cy = pm, px, py
   while #left > 0 do
+    -- drop stops that are already covered by the route so far
+    for i = #left, 1, -1 do
+      if not Useful(left[i]) then table.remove(left, i) end
+    end
+    if #left == 0 then break end
     local bi, bd
     for i, s in ipairs(left) do
       local d = (cm and cx and s.map == cm) and ((s.x - cx) ^ 2 + (s.y - cy) ^ 2) or (10 + i * 0.001)
@@ -349,6 +386,7 @@ function Geo.OrderStops(stops)
     end
     local s = table.remove(left, bi)
     out[#out + 1] = s
+    for _, k in ipairs(StopKeys(s)) do covered[k] = true end
     cm, cx, cy = s.map, s.x, s.y
   end
   return out
@@ -635,9 +673,19 @@ local function SetRoute(stops, append)
   for _, s in ipairs(stops) do
     local dup
     for _, o in ipairs(all) do
-      if o.map == s.map and (o.x - s.x) ^ 2 + (o.y - s.y) ^ 2 < 0.00005 then dup = true break end
+      if o.map == s.map and (o.x - s.x) ^ 2 + (o.y - s.y) ^ 2 < 0.00005 then dup = o break end
     end
-    if not dup then all[#all + 1] = s end
+    if dup then
+      -- same spot: keep one stop with both stops' reasons
+      for _, e in ipairs(s.teaches or {}) do
+        dup.teaches = dup.teaches or {}
+        dup.teaches[#dup.teaches + 1] = e
+      end
+      dup.pet = dup.pet or s.pet
+      dup.manual = dup.manual or s.manual
+    else
+      all[#all + 1] = s
+    end
   end
   Geo.route = Geo.OrderStops(all)
   Geo.current = #Geo.route > 0 and 1 or 0
@@ -697,7 +745,7 @@ function Geo.Waypoint(t, label, quiet)
     return
   end
   label = (label or t.name) .. (suffix or "")
-  local n = SetRoute({ { map = s.map, x = s.x, y = s.y, label = label } }, true)
+  local n = SetRoute({ Geo.MakeStop(s, label, t.name, true) }, true)
   if not quiet then
     ns.Say(("waypoint set: %s (%.0f, %.0f)%s%s"):format(label, s.x * 100, s.y * 100,
       n > 1 and (" - route now has %d stops"):format(n) or "",
@@ -712,7 +760,7 @@ function Geo.WaypointMany(list)
   for _, item in ipairs(list) do
     local s, suffix = Geo.Destination(item.t)
     if s then
-      stops[#stops + 1] = { map = s.map, x = s.x, y = s.y, label = (item.label or item.t.name) .. (suffix or "") }
+      stops[#stops + 1] = Geo.MakeStop(s, (item.label or item.t.name) .. (suffix or ""), item.t.name)
     end
   end
   if #stops == 0 then
@@ -736,6 +784,41 @@ function Geo.ClearWaypoints(quiet)
 end
 
 function Geo.HasRoute() return #Geo.route > 0 end
+
+-- Drop stops you no longer need: everything they teach is now learned
+-- (or covered by a higher rank), or the special pet has been tamed.
+local function StillNeeded(s)
+  local hasReason = s.pet or (s.teaches and #s.teaches > 0)
+  if not hasReason then return true end -- a plain stop: nothing to check, keep it
+  if s.pet and not (ns.db and ns.db.tamedRares[s.pet]) then return true end
+  for _, e in ipairs(s.teaches or {}) do
+    if not ns.IsKnown(e.ab, e.rank.rank) then return true end
+  end
+  return false
+end
+
+function Geo.PruneRoute()
+  if #Geo.route == 0 then return 0 end
+  local removed = {}
+  for i = #Geo.route, 1, -1 do
+    local s = Geo.route[i]
+    if not StillNeeded(s) then
+      table.insert(removed, 1, s.label)
+      table.remove(Geo.route, i)
+      if Geo.current > i then Geo.current = Geo.current - 1 end
+    end
+  end
+  if #removed == 0 then return 0 end
+  if #Geo.route == 0 then
+    Geo.ClearWaypoints(true)
+    ns.Say("hunt route complete - you've got everything on it.")
+    return #removed
+  end
+  Geo.current = math.max(1, math.min(Geo.current, #Geo.route))
+  ShowRoute()
+  ns.Say(("route updated: removed %s (no longer needed)."):format(table.concat(removed, ", ")))
+  return #removed
+end
 
 -- Label used for waypoints and pins
 function Geo.Label(ab, r, t) return ("%s - %s %d"):format(t.name, ab.name, r.rank) end
@@ -906,7 +989,16 @@ function Geo.QueuePins(force)
   C_Timer.After(1, function() queued = false; Geo.UpdatePins() end)
 end
 
-ns.OnRefresh(function() Geo.QueuePins() end)
+-- after learning a rank or taming a pet, drop route stops you no longer need
+local lastPruneSig
+ns.OnRefresh(function()
+  Geo.QueuePins()
+  local sig = (ns.learnedSerial or 0) .. ":" .. (ns.tamedSerial or 0)
+  if sig ~= lastPruneSig then
+    lastPruneSig = sig
+    Geo.PruneRoute()
+  end
+end)
 
 -- Master on/off for every beast pin (minimap button right-click)
 function Geo.TogglePins()
