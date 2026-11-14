@@ -211,8 +211,11 @@ function Geo.Lookup(name)
     end
   end
 
-  -- your own sightings
-  for _, p in ipairs(Geo.seen and Geo.seen[name] or {}) do add(p[1], p[2], p[3], "seen") end
+  -- your own sightings: only when nothing better is known. A sighting is
+  -- where *you* stood, so it would always win "nearest spawn" otherwise.
+  if #res.spawns == 0 then
+    for _, p in ipairs(Geo.seen and Geo.seen[name] or {}) do add(p[1], p[2], p[3], "seen") end
+  end
 
   -- RareScanner: where it was last seen
   local r = ns.RS and ns.RS.Get(name)
@@ -756,11 +759,14 @@ end
 
 -- Several beasts: a new route through all of them
 function Geo.WaypointMany(list)
-  local stops = {}
+  local stops, noSpot, seenName = {}, {}, {}
   for _, item in ipairs(list) do
     local s, suffix = Geo.Destination(item.t)
     if s then
       stops[#stops + 1] = Geo.MakeStop(s, (item.label or item.t.name) .. (suffix or ""), item.t.name)
+    elseif not seenName[item.t.name] then
+      seenName[item.t.name] = true
+      noSpot[#noSpot + 1] = item.t.name
     end
   end
   if #stops == 0 then
@@ -770,6 +776,19 @@ function Geo.WaypointMany(list)
   local n = SetRoute(stops, false)
   ns.Say(("hunt route set: %d stop%s, nearest first%s."):format(n, n == 1 and "" or "s",
     Geo.HasTomTom() and " (TomTom waypoints added)" or " - follow the marker on your minimap edge"))
+  -- say what was left out, so a missing beast is never a mystery
+  local covered = 0
+  for _, s in ipairs(stops) do
+    local kept = false
+    for _, r in ipairs(Geo.route) do if r == s then kept = true break end end
+    if not kept then covered = covered + 1 end
+  end
+  if covered > 0 then
+    ns.Say(("  %d beast%s left out: another stop already teaches the same rank."):format(covered, covered == 1 and "" or "s"))
+  end
+  if #noSpot > 0 then
+    ns.Say(("  no location known for: %s."):format(table.concat(noSpot, ", ")))
+  end
   return n
 end
 

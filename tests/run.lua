@@ -622,6 +622,28 @@ test("route: plain stops are never pruned", function()
   eq(#ns.Geo.route, 1, "a stop with nothing left to learn was added on purpose and should stay")
 end)
 
+test("route: your own sightings never override real spawn data", function()
+  local ns = H.load()
+  ns.rsRares = { ["The Rake"] = { id = 5807, map = 1412, x = 0.9, y = 0.9, path = {} } }
+  spot("The Rake", 1412, 0.1, 0.1) -- you saw its nameplate while standing at 0.1, 0.1
+  local info = ns.Geo.Lookup("The Rake")
+  eq(#info.spawns, 1, "sighting should be ignored when real data exists")
+  eq(info.spawns[1].x, 0.9)
+  local s = ns.Geo.Destination({ name = "The Rake", zone = "Mulgore" })
+  eq(s.x, 0.9, "route went to where you were standing, not the spawn")
+end)
+
+test("route: beasts that can't be placed are named in chat", function()
+  local ns = H.load()
+  spot("Prairie Wolf", 1412, 0.3, 0.3)
+  ns.Geo.WaypointMany({
+    { t = { name = "Prairie Wolf", zone = "Mulgore" }, label = "Wolf" },
+    { t = { name = "Mist Creeper", zone = "Silverpine Forest" }, label = "Mist Creeper - Web 1" },
+  })
+  eq(#ns.Geo.route, 1)
+  ok(H.said("no location known for: Mist Creeper"), "missing beast not reported")
+end)
+
 test("route: TomTom gets one waypoint per stop", function()
   local ns = H.load()
   local added, removed = 0, 0
