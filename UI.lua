@@ -1207,8 +1207,8 @@ do
   mmText:SetPoint("LEFT", mmCheck, "RIGHT", 2, 0)
   mmText:SetText("Show minimap button (works with minimap button collectors)")
   mmCheck:SetScript("OnClick", function() if ns.ToggleMinimapButton then ns.ToggleMinimapButton() end end)
-  local clear = Button(p, "Clear waypoints", 140, function() Geo.ClearWaypoints() end)
-  clear:SetPoint("TOPLEFT", 300, y)
+  local clear = Button(p, "Clear waypoints", 160, function() Geo.ClearWaypoints() end)
+  clear:SetPoint("TOPRIGHT", -8, y)
 
   function p.Refresh()
     if not p:IsShown() then return end
