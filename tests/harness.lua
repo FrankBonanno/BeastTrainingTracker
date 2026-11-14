@@ -96,7 +96,7 @@ function H.load(opts)
     H.frames[#H.frames + 1] = f
     return f
   end
-  strsplit = strsplit
+  _G.strsplit = strsplit
   wipe = function(t) for k in pairs(t) do t[k] = nil end return t end
   tinsert = table.insert
   time = os.time

@@ -6,6 +6,7 @@
 ## SavedVariablesPerCharacter: BeastTrainingTrackerDB
 ## SavedVariables: BeastTrainingTrackerBackup, BeastTrainingTrackerSeen
 ## OptionalDeps: LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0, HereBeDragons, QuestieDB, Questie, TomTom, RareScanner
+## X-Curse-Project-ID: 1804189
 ## IconTexture: Interface\Icons\Ability_Hunter_BeastTraining
 
 Libs\LibStub\LibStub.lua
