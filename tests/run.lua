@@ -426,6 +426,90 @@ test("with TomTom: waypoints go to TomTom", function()
 end)
 
 ------------------------------------------------------------------------
+-- Hunt routes
+------------------------------------------------------------------------
+-- spot a beast at a position (records a sighting there)
+local function spot(name, map, x, y)
+  H.setPosition(map, x, y)
+  H.state.units.target = { name = name }
+  H.fire("PLAYER_TARGET_CHANGED")
+end
+
+test("route: stops are ordered nearest-first from the player", function()
+  local ns = H.load()
+  H.setPosition(1412, 0.1, 0.1)
+  local out = ns.Geo.OrderStops({
+    { map = 1412, x = 0.9, y = 0.9, label = "far" },
+    { map = 1413, x = 0.1, y = 0.1, label = "other map" },
+    { map = 1412, x = 0.2, y = 0.2, label = "near" },
+    { map = 1412, x = 0.5, y = 0.5, label = "middle" },
+  })
+  eq(out[1].label, "near") eq(out[2].label, "middle") eq(out[3].label, "far") eq(out[4].label, "other map")
+end)
+
+test("route: clicking beasts adds stops, Hunt Planner starts a new route, clear empties it", function()
+  local ns = H.load()
+  spot("Prairie Wolf", 1412, 0.3, 0.3)
+  spot("The Rake", 1412, 0.6, 0.6)
+  spot("Ghostfang", 1426, 0.5, 0.5)
+  H.setPosition(1412, 0.1, 0.1)
+
+  ok(ns.Geo.Waypoint({ name = "The Rake", zone = "Mulgore" }, "Rake"), "first stop")
+  ok(ns.Geo.Waypoint({ name = "Prairie Wolf", zone = "Mulgore" }, "Wolf"), "second stop")
+  eq(#ns.Geo.route, 2, "clicks should add stops")
+  eq(ns.Geo.route[1].label, "Wolf", "nearest stop should come first")
+  eq(ns.Geo.current, 1)
+  ok(H.said("route now has 2 stops"), "no route message")
+
+  ns.Geo.Waypoint({ name = "Prairie Wolf", zone = "Mulgore" }, "Wolf again")
+  eq(#ns.Geo.route, 2, "the same spot was added twice")
+
+  local n = ns.Geo.WaypointMany({
+    { t = { name = "Ghostfang", zone = "Dun Morogh" }, label = "Ghostfang" },
+    { t = { name = "The Rake", zone = "Mulgore" }, label = "Rake" },
+    { t = { name = "Nobody Known", zone = "Nowhere" }, label = "?" },
+  })
+  eq(n, 2, "new route should only have the two known beasts")
+  eq(#ns.Geo.route, 2)
+  eq(ns.Geo.route[1].label, "Rake", "same-map stop first")
+
+  ns.Geo.ClearWaypoints()
+  eq(#ns.Geo.route, 0) eq(ns.Geo.current, 0)
+  ok(H.said("cleared 2 waypoints"), "no clear message")
+end)
+
+test("route: removing a stop keeps the rest", function()
+  local ns = H.load()
+  spot("Prairie Wolf", 1412, 0.3, 0.3)
+  spot("The Rake", 1412, 0.6, 0.6)
+  H.setPosition(1412, 0.1, 0.1)
+  ns.Geo.WaypointMany({
+    { t = { name = "Prairie Wolf", zone = "Mulgore" }, label = "Wolf" },
+    { t = { name = "The Rake", zone = "Mulgore" }, label = "Rake" },
+  })
+  ns.Geo.RemoveStop(ns.Geo.route[1])
+  eq(#ns.Geo.route, 1) eq(ns.Geo.route[1].label, "Rake") eq(ns.Geo.current, 1)
+  ns.Geo.RemoveStop(ns.Geo.route[1])
+  eq(#ns.Geo.route, 0, "removing the last stop should clear the route")
+end)
+
+test("route: TomTom gets one waypoint per stop", function()
+  local ns = H.load()
+  local added, removed = 0, 0
+  TomTom = { AddWaypoint = function() added = added + 1 return {} end, RemoveWaypoint = function() removed = removed + 1 end }
+  spot("Prairie Wolf", 1412, 0.3, 0.3)
+  spot("The Rake", 1412, 0.6, 0.6)
+  ns.Geo.WaypointMany({
+    { t = { name = "Prairie Wolf", zone = "Mulgore" }, label = "Wolf" },
+    { t = { name = "The Rake", zone = "Mulgore" }, label = "Rake" },
+  })
+  eq(added, 2, "TomTom waypoints")
+  ns.Geo.ClearWaypoints()
+  eq(removed, 2, "TomTom waypoints not removed")
+  TomTom = nil
+end)
+
+------------------------------------------------------------------------
 -- Runner
 ------------------------------------------------------------------------
 local failed = 0

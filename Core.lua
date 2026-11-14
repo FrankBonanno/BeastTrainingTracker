@@ -556,7 +556,7 @@ local DEFAULTS = {
   -- hunt planner
   huntPetOnly = false, huntDungeons = false,
   -- map & alerts
-  mapPins = true, minimapPins = true, pinsOff = false, learnToast = true,
+  mapPins = true, minimapPins = true, pinsOff = false, learnToast = true, routeOpenMap = true, routeLines = true,
   -- rare pets
   rareHideTamed = false, rareHideHigh = false, rarePins = true, rareSortSpeed = false,
   spShowRare = true, spShowElite = true, spShowSpawned = true, spShowDungeon = false,

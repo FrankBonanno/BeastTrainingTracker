@@ -119,6 +119,22 @@ teach:SetScript("OnEnter", function(self)
 end)
 teach:SetScript("OnLeave", GameTooltip_Hide)
 
+-- Clear the hunt route / waypoints (sits under the Beast Training button)
+local clearRoute = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+clearRoute:SetSize(124, 20)
+clearRoute:SetPoint("TOPRIGHT", -16, -60)
+clearRoute:SetText("Clear waypoints")
+clearRoute:SetScript("OnClick", function() ns.Geo.ClearWaypoints() end)
+clearRoute:SetScript("OnEnter", function(self)
+  GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+  local n = #ns.Geo.route
+  GameTooltip:AddLine("Clear waypoints", 1, 0.82, 0)
+  GameTooltip:AddLine(n > 0 and ("Removes the %d-stop hunt route and its waypoints."):format(n)
+    or "No waypoints set. Click beasts in any tab to build a hunt route.", 1, 1, 1, true)
+  GameTooltip:Show()
+end)
+clearRoute:SetScript("OnLeave", GameTooltip_Hide)
+
 local function PlaceTeach()
   if InCombatLockdown() then return end
   if f:IsShown() and f:GetRight() then
@@ -437,6 +453,7 @@ local function RefreshAll()
   bar:SetValue(total > 0 and known / total or 0)
   barText:SetText(("%d / %d ranks learned  (%d%%)"):format(known, total, total > 0 and math.floor(known / total * 100 + 0.5) or 0))
   UpdateAddonStrip()
+  clearRoute:SetEnabled(#ns.Geo.route > 0)
   syncText:SetText(ns.db.lastSync and ("Last Beast Training sync: " .. date("%b %d, %H:%M", ns.db.lastSync))
     or "Open Beast Training once to sync what you've learned")
 
@@ -528,7 +545,7 @@ do
 
   local footer = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   footer:SetPoint("BOTTOMLEFT", 6, 4)
-  footer:SetText("Click a rank: waypoint to a teacher  ·  Shift-click: waypoints to all teachers  ·  Click an ability to collapse")
+  footer:SetText("Click a rank: add a teacher to your route  ·  Shift-click: new route to all its teachers  ·  Click an ability to collapse")
 
   local rows = {}
 
@@ -1170,6 +1187,9 @@ do
   Check(p, "Hide ALL beast pins", "pinsOff", 4, y, "Master switch for every pin this addon draws. Same as right-clicking the minimap button.",
     function() Geo.QueuePins(true) end)
   Check(p, "Show untamed special pets on the map", "rarePins", 300, y, "Pins for untamed rares (and outdoor elites / quest spawns) you can tame, even if they teach nothing you need.")
+  y = y - 24
+  Check(p, "Open the map on the first waypoint", "routeOpenMap", 4, y, "When you set waypoints, open the world map on the first stop (not in combat).")
+  Check(p, "Draw the hunt route on the world map", "routeLines", 300, y, "Numbered stops joined by lines, nearest first. Legs you've walked are dimmed.", function() ns.Geo.DrawRoute() end)
   y = y - 30
 
   Section("Alerts")

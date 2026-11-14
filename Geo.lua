@@ -307,15 +307,25 @@ function Geo.Destination(t)
 end
 
 ------------------------------------------------------------------------
--- Waypoints: TomTom if installed, otherwise built in
+-- Waypoints and hunt routes
+--
+-- Waypoints build a route: clicking teachers adds stops, Hunt Planner's
+-- "Waypoints" starts a new route. Stops are ordered nearest-first from
+-- where you stand. TomTom (if installed) gets one waypoint per stop;
+-- otherwise a built-in marker (world map + minimap edge) points at the
+-- current stop and moves on when you arrive. Numbered pins and lines
+-- show the route on the world map, which can open on the first stop.
 ------------------------------------------------------------------------
 Geo.uids = {}
+Geo.route = {}       -- ordered stops: { map=, x=, y=, label= }
+Geo.current = 0      -- index of the stop you're heading to
 
-local target           -- { map=, x=, y=, label= } for the built-in waypoint
-local tWorld, tMini    -- its pins
 local HBD, HBDPins
 local REF = "BeastTrainingTracker"
 local REF_TARGET = "BeastTrainingTrackerTarget"
+local REF_ROUTE = "BeastTrainingTrackerRoute"
+local tWorld, tMini  -- built-in marker pins
+local stopPins = {}  -- numbered route pins
 
 local function Libs()
   HBD = HBD or (LibStub and LibStub("HereBeDragons-2.0", true))
@@ -323,7 +333,28 @@ local function Libs()
   return HBDPins
 end
 
-local function TargetPin(size)
+local function Opt(key) return ns.db and ns.db.opts[key] end
+
+-- Nearest-neighbour order, starting from the player
+function Geo.OrderStops(stops)
+  local pm, px, py = PlayerPos()
+  local left, out = {}, {}
+  for i, s in ipairs(stops) do left[i] = s end
+  local cm, cx, cy = pm, px, py
+  while #left > 0 do
+    local bi, bd
+    for i, s in ipairs(left) do
+      local d = (cm and cx and s.map == cm) and ((s.x - cx) ^ 2 + (s.y - cy) ^ 2) or (10 + i * 0.001)
+      if not bd or d < bd then bi, bd = i, d end
+    end
+    local s = table.remove(left, bi)
+    out[#out + 1] = s
+    cm, cx, cy = s.map, s.x, s.y
+  end
+  return out
+end
+
+local function MarkerPin(size, onClick)
   local p = CreateFrame("Button", nil, UIParent)
   p:SetSize(size, size)
   p.border = p:CreateTexture(nil, "BACKGROUND")
@@ -334,80 +365,264 @@ local function TargetPin(size)
   p.tex:SetAllPoints()
   p.tex:SetTexture("Interface\\Icons\\Ability_Hunter_BeastTaming")
   p.tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+  p.num = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  p.num:SetPoint("CENTER", 0, 0)
+  p.num:SetTextColor(1, 1, 1)
+  p.num:SetShadowOffset(1, -1)
   p:RegisterForClicks("AnyUp")
   p:SetScript("OnEnter", function(self)
+    local s = self.stop
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:AddLine(target and target.label or "Waypoint", 1, 0.82, 0)
-    GameTooltip:AddLine("Beast Training Tracker waypoint", 0.8, 0.8, 0.8)
-    GameTooltip:AddLine("Click to clear", 0.5, 0.5, 0.5)
+    GameTooltip:AddLine(s and s.label or "Waypoint", 1, 0.82, 0)
+    if s and s.index then
+      GameTooltip:AddLine(("Stop %d of %d"):format(s.index, #Geo.route), 0.8, 0.8, 0.8)
+    end
+    GameTooltip:AddLine("Click to remove this stop", 0.5, 0.5, 0.5)
     GameTooltip:Show()
   end)
   p:SetScript("OnLeave", GameTooltip_Hide)
-  p:SetScript("OnClick", function() Geo.ClearTarget(true) end)
+  p:SetScript("OnClick", onClick)
   return p
 end
 
-function Geo.ClearTarget(say)
+------------------------------------------------------------------------
+-- Route lines on the world map
+------------------------------------------------------------------------
+local lineFrame, lines = nil, {}
+local mapInfo  -- "Hunt route: 3 stops [Clear]" box on the world map
+
+local function Canvas()
+  return WorldMapFrame and WorldMapFrame.ScrollContainer and WorldMapFrame.ScrollContainer.Child
+end
+
+function Geo.DrawRoute()
+  local canvas = Canvas()
+  if not canvas then return end
+  if not lineFrame then
+    lineFrame = CreateFrame("Frame", nil, canvas)
+    lineFrame:SetAllPoints(canvas)
+  end
+  lineFrame:SetFrameLevel(canvas:GetFrameLevel() + 1)
+  for _, l in ipairs(lines) do l:Hide() end
+
+  -- info box with a Clear button
+  if mapInfo then
+    mapInfo:SetShown(#Geo.route > 0)
+    mapInfo.text:SetText(("|cffabd473Beast hunt:|r stop %d of %d"):format(math.max(Geo.current, 1), #Geo.route))
+    mapInfo:SetWidth(mapInfo.text:GetStringWidth() + 90)
+  end
+
+  if not Libs() or not HBD or not WorldMapFrame:IsShown() or #Geo.route < 2 or Opt("routeLines") == false then return end
+  local mapID = WorldMapFrame:GetMapID()
+  local w, h = canvas:GetWidth(), canvas:GetHeight()
+  local scale = canvas:GetScale() > 0 and canvas:GetScale() or 1
+  local prev, n = nil, 0
+  for i, s in ipairs(Geo.route) do
+    local x, y = s.x, s.y
+    if s.map ~= mapID then x, y = HBD:TranslateZoneCoordinates(s.x, s.y, s.map, mapID, true) end
+    local pt = (x and y) and { x * w, y * h } or nil
+    if prev and pt then
+      n = n + 1
+      local l = lines[n]
+      if not l then
+        l = lineFrame:CreateLine(nil, "OVERLAY")
+        lines[n] = l
+      end
+      l:SetThickness(4 / scale)
+      -- legs you've already walked are dimmed
+      if i <= Geo.current then l:SetColorTexture(1, 0.82, 0, 0.3) else l:SetColorTexture(1, 0.82, 0, 0.9) end
+      l:SetStartPoint("TOPLEFT", lineFrame, prev[1], -prev[2])
+      l:SetEndPoint("TOPLEFT", lineFrame, pt[1], -pt[2])
+      l:Show()
+    end
+    prev = pt
+  end
+end
+
+local hooked
+local function HookWorldMap()
+  if hooked or not WorldMapFrame then return end
+  hooked = true
+  WorldMapFrame:HookScript("OnShow", Geo.DrawRoute)
+  if WorldMapFrame.OnMapChanged then hooksecurefunc(WorldMapFrame, "OnMapChanged", Geo.DrawRoute) end
+  if WorldMapFrame.OnCanvasScaleChanged then hooksecurefunc(WorldMapFrame, "OnCanvasScaleChanged", Geo.DrawRoute) end
+
+  local parent = WorldMapFrame.ScrollContainer or WorldMapFrame
+  mapInfo = CreateFrame("Frame", nil, parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+  mapInfo:SetSize(220, 26)
+  mapInfo:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -8)
+  mapInfo:SetFrameLevel(parent:GetFrameLevel() + 50)
+  if mapInfo.SetBackdrop then
+    mapInfo:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 10, insets = { left = 2, right = 2, top = 2, bottom = 2 } })
+    mapInfo:SetBackdropColor(0, 0, 0, 0.75)
+  end
+  mapInfo.text = mapInfo:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  mapInfo.text:SetPoint("LEFT", 8, 0)
+  local clear = CreateFrame("Button", nil, mapInfo, "UIPanelButtonTemplate")
+  clear:SetSize(70, 18)
+  clear:SetPoint("RIGHT", -4, 0)
+  clear:SetText("Clear")
+  clear:SetScript("OnClick", function() Geo.ClearWaypoints() end)
+  mapInfo:Hide()
+end
+Geo.HookWorldMap = HookWorldMap
+
+-- Open the world map on a stop (skipped in combat or if turned off)
+local function ShowOnMap(map)
+  if not WorldMapFrame or Opt("routeOpenMap") == false then return end
+  if InCombatLockdown and InCombatLockdown() then return end
+  if OpenWorldMap then
+    pcall(OpenWorldMap, map)
+  else
+    if not WorldMapFrame:IsShown() then
+      if ToggleWorldMap then pcall(ToggleWorldMap) else pcall(ShowUIPanel, WorldMapFrame) end
+    end
+    if WorldMapFrame.SetMapID then pcall(WorldMapFrame.SetMapID, WorldMapFrame, map) end
+  end
+end
+
+------------------------------------------------------------------------
+-- Showing the route (TomTom waypoints or built-in marker + numbered pins)
+------------------------------------------------------------------------
+local function ClearShown()
+  if TomTom and TomTom.RemoveWaypoint then
+    for _, uid in ipairs(Geo.uids) do pcall(TomTom.RemoveWaypoint, TomTom, uid) end
+  end
+  wipe(Geo.uids)
+  if Libs() then
+    HBDPins:RemoveAllWorldMapIcons(REF_TARGET)
+    HBDPins:RemoveAllMinimapIcons(REF_TARGET)
+    HBDPins:RemoveAllWorldMapIcons(REF_ROUTE)
+  end
+  if Geo.blizzardWaypoint and C_Map and C_Map.ClearUserWaypoint then pcall(C_Map.ClearUserWaypoint) end
+  Geo.blizzardWaypoint = nil
+end
+
+-- Point the built-in marker (and Blizzard's map pin) at one stop
+local function PointAt(s)
   if Libs() then
     HBDPins:RemoveAllWorldMapIcons(REF_TARGET)
     HBDPins:RemoveAllMinimapIcons(REF_TARGET)
   end
-  if target and target.blizzard and C_Map and C_Map.ClearUserWaypoint then pcall(C_Map.ClearUserWaypoint) end
-  if say and target then ns.Say("waypoint cleared.") end
-  target = nil
+  if Geo.blizzardWaypoint and C_Map and C_Map.ClearUserWaypoint then pcall(C_Map.ClearUserWaypoint) end
+  Geo.blizzardWaypoint = nil
+  if not s or Geo.HasTomTom() then return end
+  if C_Map and C_Map.SetUserWaypoint and UiMapPoint and UiMapPoint.CreateFromCoordinates then
+    local can = not C_Map.CanSetUserWaypointOnMap or C_Map.CanSetUserWaypointOnMap(s.map)
+    if can and pcall(C_Map.SetUserWaypoint, UiMapPoint.CreateFromCoordinates(s.map, s.x, s.y)) then
+      Geo.blizzardWaypoint = true
+      if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, true) end
+    end
+  end
+  if Libs() then
+    tWorld = tWorld or MarkerPin(20, function(self) Geo.RemoveStop(self.stop) end)
+    tMini = tMini or MarkerPin(16, function(self) Geo.RemoveStop(self.stop) end)
+    tWorld.stop, tMini.stop = s, s
+    tWorld.num:SetText(s.index or "")
+    tMini.num:SetText("")
+    HBDPins:AddWorldMapIconMap(REF_TARGET, tWorld, s.map, s.x, s.y, 3)
+    -- floats on the minimap edge, so it points the way
+    HBDPins:AddMinimapIconMap(REF_TARGET, tMini, s.map, s.x, s.y, true, true)
+  end
 end
 
--- arrival check for the built-in waypoint
+local function ShowRoute()
+  ClearShown()
+  for i, s in ipairs(Geo.route) do s.index = i end
+  if Geo.HasTomTom() then
+    for _, s in ipairs(Geo.route) do
+      local ok, uid = pcall(TomTom.AddWaypoint, TomTom, s.map, s.x, s.y, {
+        title = s.label, persistent = false, minimap = true, world = true, from = "Beast Training Tracker",
+      })
+      if ok and uid then Geo.uids[#Geo.uids + 1] = uid end
+    end
+    if #Geo.uids > 1 and TomTom.SetClosestWaypoint then pcall(TomTom.SetClosestWaypoint, TomTom) end
+  end
+  -- numbered pins for every stop (the current one gets the gold marker)
+  if Libs() and #Geo.route > 1 then
+    for i, s in ipairs(Geo.route) do
+      if i ~= Geo.current or Geo.HasTomTom() then
+        local p = stopPins[i]
+        if not p then
+          p = MarkerPin(16, function(self) Geo.RemoveStop(self.stop) end)
+          stopPins[i] = p
+        end
+        p.stop = s
+        p.num:SetText(i)
+        p.border:SetColorTexture(1, 0.82, 0, i < Geo.current and 0.4 or 1)
+        HBDPins:AddWorldMapIconMap(REF_ROUTE, p, s.map, s.x, s.y, 3)
+      end
+    end
+  end
+  PointAt(Geo.route[Geo.current])
+  Geo.DrawRoute()
+end
+
+-- Replace (or extend) the route. Returns the number of stops.
+local function SetRoute(stops, append)
+  local all = {}
+  if append then
+    for _, s in ipairs(Geo.route) do all[#all + 1] = s end
+  end
+  for _, s in ipairs(stops) do
+    local dup
+    for _, o in ipairs(all) do
+      if o.map == s.map and (o.x - s.x) ^ 2 + (o.y - s.y) ^ 2 < 0.00005 then dup = true break end
+    end
+    if not dup then all[#all + 1] = s end
+  end
+  Geo.route = Geo.OrderStops(all)
+  Geo.current = #Geo.route > 0 and 1 or 0
+  ShowRoute()
+  if Geo.route[1] then ShowOnMap(Geo.route[1].map) end
+  if ns.Refresh then ns.Refresh() end
+  return #Geo.route
+end
+
+function Geo.RemoveStop(stop)
+  for i, s in ipairs(Geo.route) do
+    if s == stop then
+      table.remove(Geo.route, i)
+      if Geo.current > i then Geo.current = Geo.current - 1 end
+      if Geo.current > #Geo.route then Geo.current = #Geo.route end
+      if #Geo.route == 0 then Geo.ClearWaypoints() return end
+      ShowRoute()
+      ns.Say(("removed %s from the route."):format(stop.label))
+      return
+    end
+  end
+end
+
+-- Arrival: move on to the next stop
 local arrive = CreateFrame("Frame")
 local arriveElapsed = 0
 arrive:SetScript("OnUpdate", function(_, elapsed)
   arriveElapsed = arriveElapsed + (elapsed or 0)
-  if arriveElapsed < 1 or not target then return end
+  if arriveElapsed < 1 or Geo.current < 1 then return end
   arriveElapsed = 0
-  if not HBD then return end
+  local s = Geo.route[Geo.current]
+  if not s or not HBD then return end
   local x, y, m = HBD:GetPlayerZonePosition()
   if not (x and m) then return end
-  local d = HBD:GetZoneDistance(m, x, y, target.map, target.x, target.y)
+  local d = HBD:GetZoneDistance(m, x, y, s.map, s.x, s.y)
   if d and d < 25 then
-    ns.Say(("arrived at %s."):format(target.label))
-    Geo.ClearTarget()
+    if Geo.current >= #Geo.route then
+      ns.Say(("arrived at %s - hunt route complete."):format(s.label))
+      Geo.ClearWaypoints(true)
+    else
+      Geo.current = Geo.current + 1
+      local nxt = Geo.route[Geo.current]
+      ns.Say(("arrived at %s. Next: %s (stop %d of %d)."):format(s.label, nxt.label, Geo.current, #Geo.route))
+      ShowRoute()
+    end
   end
 end)
 
-local function SetTarget(s, label)
-  Geo.ClearTarget()
-  target = { map = s.map, x = s.x, y = s.y, label = label }
-  -- Blizzard's own map pin, where the client supports it
-  if C_Map and C_Map.SetUserWaypoint and UiMapPoint and UiMapPoint.CreateFromCoordinates then
-    local can = not C_Map.CanSetUserWaypointOnMap or C_Map.CanSetUserWaypointOnMap(s.map)
-    if can and pcall(C_Map.SetUserWaypoint, UiMapPoint.CreateFromCoordinates(s.map, s.x, s.y)) then
-      target.blizzard = true
-      if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, true) end
-    end
-  end
-  -- our own marker: world map + minimap (floats on the minimap edge = direction)
-  if Libs() then
-    tWorld = tWorld or TargetPin(20)
-    tMini = tMini or TargetPin(16)
-    HBDPins:AddWorldMapIconMap(REF_TARGET, tWorld, s.map, s.x, s.y, 3)
-    HBDPins:AddMinimapIconMap(REF_TARGET, tMini, s.map, s.x, s.y, true, true)
-  end
-  return true
-end
-
-local function AddWaypoint(s, label)
-  if Geo.HasTomTom() then
-    local ok, uid = pcall(TomTom.AddWaypoint, TomTom, s.map, s.x, s.y, {
-      title = label, persistent = false, minimap = true, world = true, from = "Beast Training Tracker",
-    })
-    if ok and uid then
-      Geo.uids[#Geo.uids + 1] = uid
-      return uid
-    end
-  end
-  return SetTarget(s, label)
-end
-
+------------------------------------------------------------------------
+-- Public waypoint API
+------------------------------------------------------------------------
+-- One beast: added to the current route
 function Geo.Waypoint(t, label, quiet)
   local s, suffix, why = Geo.Destination(t)
   if not s then
@@ -415,59 +630,45 @@ function Geo.Waypoint(t, label, quiet)
     return
   end
   label = (label or t.name) .. (suffix or "")
-  local res = AddWaypoint(s, label)
-  if res and not quiet then
-    ns.Say(("waypoint set: %s (%.0f, %.0f)%s"):format(label, s.x * 100, s.y * 100,
+  local n = SetRoute({ { map = s.map, x = s.x, y = s.y, label = label } }, true)
+  if not quiet then
+    ns.Say(("waypoint set: %s (%.0f, %.0f)%s%s"):format(label, s.x * 100, s.y * 100,
+      n > 1 and (" - route now has %d stops"):format(n) or "",
       Geo.HasTomTom() and "" or " - follow the marker on your minimap edge"))
   end
-  return res
+  return true
 end
 
--- Several beasts: TomTom gets one waypoint each; built in marks the nearest
+-- Several beasts: a new route through all of them
 function Geo.WaypointMany(list)
-  if Geo.HasTomTom() then
-    local n = 0
-    for _, item in ipairs(list) do
-      if Geo.Waypoint(item.t, item.label, true) then n = n + 1 end
-    end
-    if n > 0 then
-      if TomTom.SetClosestWaypoint then pcall(TomTom.SetClosestWaypoint, TomTom) end
-      ns.Say(("added %d TomTom waypoint%s."):format(n, n == 1 and "" or "s"))
-    else
-      ns.Say("no locations known yet for those beasts.")
-    end
-    return n
-  end
-  local pm, px, py = PlayerPos()
-  local best, bestLabel, bd
+  local stops = {}
   for _, item in ipairs(list) do
     local s, suffix = Geo.Destination(item.t)
     if s then
-      local d = (pm and px and s.map == pm) and ((s.x - px) ^ 2 + (s.y - py) ^ 2) or 99
-      if not bd or d < bd then best, bestLabel, bd = s, (item.label or item.t.name) .. (suffix or ""), d end
+      stops[#stops + 1] = { map = s.map, x = s.x, y = s.y, label = (item.label or item.t.name) .. (suffix or "") }
     end
   end
-  if not best then
+  if #stops == 0 then
     ns.Say("no locations known yet for those beasts.")
     return 0
   end
-  SetTarget(best, bestLabel)
-  ns.Say(("waypoint set to the nearest: %s (%.0f, %.0f) - the rest are pins on your map."):format(bestLabel, best.x * 100, best.y * 100))
-  return 1
+  local n = SetRoute(stops, false)
+  ns.Say(("hunt route set: %d stop%s, nearest first%s."):format(n, n == 1 and "" or "s",
+    Geo.HasTomTom() and " (TomTom waypoints added)" or " - follow the marker on your minimap edge"))
+  return n
 end
 
-function Geo.ClearWaypoints()
-  local n = 0
-  if TomTom and TomTom.RemoveWaypoint then
-    for _, uid in ipairs(Geo.uids) do
-      if pcall(TomTom.RemoveWaypoint, TomTom, uid) then n = n + 1 end
-    end
-  end
-  wipe(Geo.uids)
-  if target then n = n + 1 end
-  Geo.ClearTarget()
-  ns.Say(("removed %d waypoint%s."):format(n, n == 1 and "" or "s"))
+function Geo.ClearWaypoints(quiet)
+  local n = #Geo.route
+  ClearShown()
+  wipe(Geo.route)
+  Geo.current = 0
+  Geo.DrawRoute()
+  if ns.Refresh then ns.Refresh() end
+  if not quiet then ns.Say(("cleared %d waypoint%s."):format(n, n == 1 and "" or "s")) end
 end
+
+function Geo.HasRoute() return #Geo.route > 0 end
 
 -- Label used for waypoints and pins
 function Geo.Label(ab, r, t) return ("%s - %s %d"):format(t.name, ab.name, r.rank) end
@@ -688,6 +889,7 @@ end)
 
 ns.OnLogin(function()
   Libs()
+  HookWorldMap()
   if not Geo.HasQuestie() then
     Geo.status = "Questie not installed"
     return
@@ -716,12 +918,14 @@ ns.OnLogin(function()
 end)
 
 local zev = CreateFrame("Frame")
-for _, e in ipairs({ "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD", "NAME_PLATE_UNIT_ADDED",
+for _, e in ipairs({ "ADDON_LOADED", "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD", "NAME_PLATE_UNIT_ADDED",
   "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT" }) do
   pcall(zev.RegisterEvent, zev, e)
 end
 zev:SetScript("OnEvent", function(_, e, unit)
-  if e == "NAME_PLATE_UNIT_ADDED" then
+  if e == "ADDON_LOADED" then
+    if unit == "Blizzard_WorldMap" then HookWorldMap() end
+  elseif e == "NAME_PLATE_UNIT_ADDED" then
     if unit then Geo.RecordSighting(unit) end
   elseif e == "PLAYER_TARGET_CHANGED" then
     Geo.RecordSighting("target")

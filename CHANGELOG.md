@@ -14,6 +14,7 @@ First public release.
 - **Special Pets** tab: 140 rare, elite and quest-spawned pets, with attack speed, traits and a tamed checklist that keeps tracking renamed pets.
 - **My Pet** tab: upgrades you can teach now, ranks coming up as your pet levels, and a Beast Training button.
 - Map and minimap pins, waypoints and a movable zone tracker.
+- Hunt routes: waypoints are ordered nearest-first and drawn as numbered stops joined by lines on the world map, which opens on the first stop. Clear them from the window header or the world map.
 - Alerts when a beast that teaches something you need is nearby, and a popup when you learn a new ability.
 - Minimap button: left-click opens the window, right-click shows or hides pins, middle-click toggles the tracker.
 - Export and import of learned ranks and tamed pets, an automatic account-wide backup, and a Reset button.
