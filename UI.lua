@@ -837,10 +837,10 @@ do
   local intro = Text(p, "GameFontHighlightSmall", 6, -6)
   intro:SetWidth(WIDTH - 40)
   Check(p, "My pet's family only", "huntPetOnly", 2, -26, "Only count abilities your current pet's family can use.")
-  Check(p, "Include dungeons", "huntDungeons", 170, -26, "Also count beasts that live inside dungeons.")
-  Check(p, "Sort by most new ranks", "huntSortCount", 310, -26, "Show the zones with the most new ranks first, instead of lowest level first.")
-  local clear = Button(p, "Clear my waypoints", 140, function() Geo.ClearWaypoints() end)
-  clear:SetPoint("TOPRIGHT", -4, -26)
+  Check(p, "Include dungeons", "huntDungeons", 160, -26, "Also count beasts that live inside dungeons.")
+  Check(p, "Sort by most new ranks", "huntSortCount", 290, -26, "Show the zones with the most new ranks first, instead of lowest level first.")
+  Check(p, "Show enemy faction zones", "huntBothFactions", 470, -26,
+    "Also list zones that belong to the other faction (marked in red). Contested zones are always shown.")
   Divider(p, -54)
   local L = MakeList(p, -58, 4)
 
@@ -879,6 +879,7 @@ do
       -- level range: grey = outlevelled, green = your level, orange = above you
       local rc = (z.maxLevel < lvl) and "|cff9d9d9d" or ((z.minLevel > lvl) and "|cffff9040" or GREEN)
       local range = z.minLevel > 0 and ("  %s(%d-%d)|r"):format(rc, z.minLevel, z.maxLevel) or ""
+      if ns.ZoneHostile(z.zone) then range = range .. ("  |cffff4040%s|r"):format(ns.ZoneFaction(z.zone)) end
       items[#items + 1] = {
         kind = "head",
         left = ("%s%s|r%s"):format(z.here and GREEN or "|cffffffff", z.zone, range),

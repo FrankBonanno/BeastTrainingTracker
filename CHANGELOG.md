@@ -10,7 +10,7 @@ First public release.
 ### Added
 - **Abilities** tab: every pet ability rank, the pet level and training points each needs, and the beasts that teach it. Beasts in your current zone are highlighted in green.
 - Automatic sync of learned ranks whenever you open Beast Training, plus detection from your pet's spellbook and "You have learned" messages. Saved ranks are never overwritten.
-- **Hunt Planner** tab: the zones where you can tame missing ranks at your level, with each zone's level range, listed from lowest to highest level (or by most new ranks).
+- **Hunt Planner** tab: the zones where you can tame missing ranks at your level, with each zone's level range, listed from lowest to highest level (or by most new ranks). The other faction's zones are hidden unless you turn them on.
 - **Special Pets** tab: 140 rare, elite and quest-spawned pets, with attack speed, traits and a tamed checklist that keeps tracking renamed pets.
 - **My Pet** tab: upgrades you can teach now, ranks coming up as your pet levels, and a Beast Training button.
 - Map and minimap pins, waypoints and a movable zone tracker.

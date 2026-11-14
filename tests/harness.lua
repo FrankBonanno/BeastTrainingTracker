@@ -75,6 +75,7 @@ function H.load(opts)
     pet = nil,       -- { name=, family=, level=, guid=, spells = { {"Bite","Rank 2"}, ... } }
     trainer = nil,   -- { {"Bite","Rank 1","available"}, ... }
     units = {},      -- other units: units.target = { name = "Prairie Wolf" }
+    faction = "Horde",
   }
   local S = H.state
 
@@ -113,6 +114,7 @@ function H.load(opts)
   ERR_LEARN_SPELL_S = "You have learned a new spell: %s."
 
   UnitClass = function(u) if u == "player" then return "Hunter", "HUNTER" end end
+  UnitFactionGroup = function(u) if u == "player" then return S.faction, S.faction end end
   UnitName = function(u)
     if u == "player" then return "Tester" end
     if u == "pet" and S.pet then return S.pet.name end

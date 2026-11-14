@@ -406,19 +406,43 @@ function ns.ZoneLevels(zone)
   return zoneCache[zone][1], zoneCache[zone][2]
 end
 
+-- Faction territory. Zones not listed are contested or unknown (shown to everyone).
+local ZONE_FACTION = {
+  ["Elwynn Forest"] = "Alliance", ["Dun Morogh"] = "Alliance", ["Teldrassil"] = "Alliance",
+  ["Westfall"] = "Alliance", ["Loch Modan"] = "Alliance", ["Darkshore"] = "Alliance",
+  ["Redridge Mountains"] = "Alliance", ["Duskwood"] = "Alliance", ["Wetlands"] = "Alliance",
+  ["Stormwind City"] = "Alliance", ["Ironforge"] = "Alliance", ["Darnassus"] = "Alliance",
+  ["Durotar"] = "Horde", ["Mulgore"] = "Horde", ["Tirisfal Glades"] = "Horde",
+  ["Silverpine Forest"] = "Horde", ["The Barrens"] = "Horde",
+  ["Orgrimmar"] = "Horde", ["Thunder Bluff"] = "Horde", ["Undercity"] = "Horde",
+}
+
+-- "Alliance" / "Horde" / nil (contested or unknown)
+function ns.ZoneFaction(zone) return ZONE_FACTION[BaseZone(zone)] end
+
+-- true if the zone belongs to the other faction
+function ns.ZoneHostile(zone)
+  local f = ns.ZoneFaction(zone)
+  local me = UnitFactionGroup and UnitFactionGroup("player")
+  return f ~= nil and me ~= nil and f ~= me
+end
+
 -- Missing ranks you can tame right now, grouped by zone.
 -- Only the highest missing rank per ability counts (it covers the lower ones).
 -- Returns { {zone=, entries={ {ab=, rank=, teachers={...}} }, levelSum=, minLevel=, maxLevel=} }.
 -- sortBy "count": most new ranks first; otherwise by zone level, lowest first.
-function ns.HuntPlan(petOnly, dungeons, sortBy)
+-- The other faction's zones are left out unless allFactions is set or the
+-- "Show enemy faction zones" option is on.
+function ns.HuntPlan(petOnly, dungeons, sortBy, allFactions)
   local fam = ns.PetFamily()
+  local hideHostile = not allFactions and not (ns.db and ns.db.opts.huntBothFactions)
   local zones = {}
   for _, ab in ipairs(abilities) do
     if ab.src == "beast" and (not petOnly or ns.AbilityFitsPet(ab, fam)) then
       for _, r in ipairs(ab.parsed) do
         if not ns.IsKnown(ab, r.rank) then
           for _, t in ipairs(r.teachers) do
-            if ns.CanTame(t) and (dungeons or not t.dungeon) then
+            if ns.CanTame(t) and (dungeons or not t.dungeon) and not (hideHostile and ns.ZoneHostile(t.zone)) then
               local z = zones[t.zone]
               if not z then z = { zone = t.zone, by = {} }; zones[t.zone] = z end
               local cur = z.by[ab.name]
@@ -465,7 +489,7 @@ end
 -- Highest missing rank per ability that's tameable in the zone you're in
 function ns.NeededHere()
   local zone = ns.CurrentZone()
-  for _, z in ipairs(ns.HuntPlan(false, true)) do
+  for _, z in ipairs(ns.HuntPlan(false, true, nil, true)) do -- your current zone, whoever owns it
     if z.here then return z.entries, z.zone end
   end
   return {}, zone
@@ -624,7 +648,7 @@ local DEFAULTS = {
   -- ability list
   petOnly = false, hideKnown = false, hideTrainer = false, hideHigh = false, zoneOnly = false,
   -- hunt planner
-  huntPetOnly = false, huntDungeons = false, huntSortCount = false,
+  huntPetOnly = false, huntDungeons = false, huntSortCount = false, huntBothFactions = false,
   -- map & alerts
   mapPins = true, minimapPins = true, pinsOff = false, learnToast = true, routeOpenMap = true, routeLines = true,
   -- rare pets

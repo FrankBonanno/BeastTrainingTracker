@@ -245,6 +245,36 @@ test("hunt plan: lowest level zones first by default", function()
   end
 end)
 
+local function PlanHas(plan, zone)
+  for _, z in ipairs(plan) do
+    if z.zone:find(zone, 1, true) then return true end
+  end
+  return false
+end
+
+test("hunt plan: the other faction's zones are hidden unless turned on", function()
+  local ns = H.load() -- Horde
+  H.state.level = 12
+  ok(not PlanHas(ns.HuntPlan(false, false), "Elwynn Forest"), "Horde sees Elwynn Forest")
+  ok(PlanHas(ns.HuntPlan(false, false), "Durotar"), "Horde should see Durotar")
+  ns.db.opts.huntBothFactions = true
+  ok(PlanHas(ns.HuntPlan(false, false), "Elwynn Forest"), "option should show Alliance zones")
+
+  local ns2 = H.load()
+  H.state.faction, H.state.level = "Alliance", 12
+  ok(not PlanHas(ns2.HuntPlan(false, false), "Durotar"), "Alliance sees Durotar")
+  ok(PlanHas(ns2.HuntPlan(false, false), "Elwynn Forest"), "Alliance should see Elwynn Forest")
+  eq(ns2.ZoneHostile("Durotar"), true)
+  eq(ns2.ZoneHostile("Stranglethorn Vale"), false, "contested zones are never hostile")
+end)
+
+test("zone tracker still lists beasts in an enemy zone you're standing in", function()
+  local ns = H.load() -- Horde
+  H.state.level, H.state.zone = 12, "Elwynn Forest"
+  local entries = ns.NeededHere()
+  ok(#entries > 0, "nothing listed in Elwynn Forest for a Horde player standing there")
+end)
+
 test("needed-here only lists the current zone", function()
   local ns = H.load()
   H.state.level, H.state.zone = 12, "Mulgore"
