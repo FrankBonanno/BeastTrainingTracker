@@ -1,7 +1,14 @@
 # Changelog
 
 All notable changes to Beast Training Tracker are listed here.
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
+
+## [1.3.0] - 2026-11-14
+
+### Changed
+- The zone tracker now shows a beast it can put on the map for each ability, instead of always the first one listed. Beasts with no known location are only shown when nothing else teaches that rank in the zone, greyed out and marked with "?".
+
+### Added
+- Right-click a line in the zone tracker to switch to a different beast for that ability. Your choice is remembered. The tooltip marks the beast that's shown and the ones with no known location.
 
 ## [1.2.1] - 2026-11-14
 
