@@ -18,4 +18,5 @@ First public release.
 - Alerts when a beast that teaches something you need is nearby, and a popup when you learn a new ability.
 - Minimap button: left-click opens the window, right-click shows or hides pins, middle-click toggles the tracker.
 - Export and import of learned ranks and tamed pets, an automatic account-wide backup, and a Reset button.
+- The installed version is shown at the bottom of Settings, with a one-time chat note after updating.
 - Works on its own. Optional support for Questie (spawn locations), TomTom (waypoint arrows) and RareScanner (live rare timers), with their status shown in the window.

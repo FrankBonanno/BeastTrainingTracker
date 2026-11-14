@@ -521,6 +521,27 @@ test("route: TomTom gets one waypoint per stop", function()
 end)
 
 ------------------------------------------------------------------------
+-- Version
+------------------------------------------------------------------------
+test("version: unpackaged copy reports a development version", function()
+  local ns = H.load()
+  eq(ns.Version(), "dev")
+  has(ns.VersionText(), "development")
+  ns = H.load({ version = "@project-version@" })
+  eq(ns.Version(), "dev", "unreplaced packager token")
+end)
+
+test("version: packaged release shows its tag and announces updates once", function()
+  local ns = H.load({ version = "v1.3.0", db = { lastVersion = "v1.2.0" } })
+  eq(ns.VersionText(), "v1.3.0")
+  ok(H.said("updated to"), "no update message")
+  eq(ns.db.lastVersion, "v1.3.0")
+
+  H.load({ version = "v1.3.0", db = { lastVersion = "v1.3.0" } })
+  ok(not H.said("updated to"), "update message on a normal login")
+end)
+
+------------------------------------------------------------------------
 -- Runner
 ------------------------------------------------------------------------
 local failed = 0

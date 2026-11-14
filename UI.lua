@@ -1310,10 +1310,16 @@ do
   local clear = Button(p, "Clear waypoints", 160, function() Geo.ClearWaypoints() end)
   clear:SetPoint("TOPRIGHT", -8, y)
 
+  -- installed version, bottom right
+  local versionText = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  versionText:SetPoint("BOTTOMRIGHT", -8, 4)
+  versionText:SetJustifyH("RIGHT")
+
   function p.Refresh()
     if not p:IsShown() then return end
     mmCheck:SetChecked(not ns.db.minimap.hide)
     ShowRouteColor()
+    versionText:SetText("Beast Training Tracker  |cffffffff" .. ns.VersionText() .. "|r")
     for i, a in ipairs(Geo.AddonStatus()) do
       local r = addonRows[i]
       r.dot:SetTexture(a.on and "Interface\\COMMON\\Indicator-Green" or "Interface\\COMMON\\Indicator-Gray")

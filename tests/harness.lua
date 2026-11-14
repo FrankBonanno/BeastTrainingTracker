@@ -79,7 +79,8 @@ function H.load(opts)
   local S = H.state
 
   -- saved variables
-  BeastTrainingTrackerDB = nil
+  BeastTrainingTrackerDB = opts.db
+  GetAddOnMetadata = opts.version and function(_, field) if field == "Version" then return opts.version end end or nil
   BeastTrainingTrackerBackup = opts.backup
   BeastTrainingTrackerSeen = opts.seen
 

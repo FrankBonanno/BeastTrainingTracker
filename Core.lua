@@ -613,7 +613,31 @@ local function InitDB()
   if restored > 0 then Say(("restored %d learned ranks from backup."):format(restored)) end
   if restoredPets > 0 then Say(("restored %d tamed special pets from backup."):format(restoredPets)) end
 
+  -- one-time note after updating to a new version
+  local v = ns.Version()
+  if v ~= "dev" then
+    if db.lastVersion and db.lastVersion ~= v then
+      Say(("updated to |cffffffff%s|r. See the changelog on CurseForge for what's new."):format(v))
+    end
+    db.lastVersion = v
+  end
+
   for _, fn in ipairs(ns.initers) do fn(db) end
+end
+
+-- Installed version from the TOC. The packager replaces @project-version@
+-- with the release tag; an unpackaged copy reports "dev".
+function ns.Version()
+  local get = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+  local ok, v = false, nil
+  if get then ok, v = pcall(get, ADDON, "Version") end
+  if not ok or type(v) ~= "string" or v == "" or v:find("@", 1, true) then return "dev" end
+  return v
+end
+
+function ns.VersionText()
+  local v = ns.Version()
+  return v == "dev" and "development version (not a packaged release)" or v
 end
 
 local ev = CreateFrame("Frame")
@@ -674,6 +698,7 @@ dbgFrame:SetScript("OnEvent", function(_, e, ...)
 end)
 
 function ns.PrintStatus()
+  print("|cffabd473BTT|r", "version: " .. ns.VersionText())
   local known, total = ns.Counts()
   local explicit = 0
   for _ in pairs(ns.db.known) do explicit = explicit + 1 end
