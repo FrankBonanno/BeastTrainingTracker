@@ -1190,13 +1190,13 @@ do
   y = y - 24
   Check(p, "Open the map on the first waypoint", "routeOpenMap", 4, y, "When you set waypoints, open the world map on the first stop (not in combat).")
   Check(p, "Draw the hunt route on the world map", "routeLines", 300, y, "Numbered stops joined by a dotted line, nearest first. Pick the color and opacity below.", function() ns.Geo.DrawRoute() end)
-  y = y - 26
+  y = y - 36
 
   -- Route line color + opacity
   local colorLabel = Text(p, "GameFontHighlightSmall", 10, y - 5, "Route line color")
   local swatch = CreateFrame("Button", nil, p, BackdropTemplateMixin and "BackdropTemplate" or nil)
-  swatch:SetSize(20, 20)
-  swatch:SetPoint("LEFT", colorLabel, "RIGHT", 8, 0)
+  swatch:SetSize(48, 20)
+  swatch:SetPoint("LEFT", colorLabel, "RIGHT", 12, 0)
   if swatch.SetBackdrop then
     swatch:SetBackdrop({ edgeFile = "Interface\Tooltips\UI-Tooltip-Border", edgeSize = 8 })
     swatch:SetBackdropBorderColor(0.8, 0.8, 0.8, 1)
@@ -1238,7 +1238,7 @@ do
 
   local alpha = CreateFrame("Slider", "BeastTrainingTrackerRouteAlpha", p, "OptionsSliderTemplate")
   alpha:SetWidth(160)
-  alpha:SetPoint("LEFT", swatch, "RIGHT", 70, 0)
+  alpha:SetPoint("LEFT", swatch, "RIGHT", 90, 0)
   alpha:SetMinMaxValues(0.1, 1)
   alpha:SetValueStep(0.05)
   if alpha.SetObeyStepOnDrag then alpha:SetObeyStepOnDrag(true) end
@@ -1262,15 +1262,15 @@ do
     alpha:SetValue(d.a)
     SetRouteColor(d.r, d.g, d.b)
   end)
-  resetColor:SetPoint("LEFT", alpha, "RIGHT", 24, 0)
+  resetColor:SetPoint("LEFT", alpha, "RIGHT", 40, 0)
 
-  -- show current values whenever Settings opens
-  p:HookScript("OnShow", function()
+  -- current values, filled in whenever Settings refreshes
+  local function ShowRouteColor()
     local r, g, b, a = ns.Geo.RouteColor()
     swatch.color:SetColorTexture(r, g, b, 1)
     alpha:SetValue(a)
-  end)
-  y = y - 34
+  end
+  y = y - 40
 
   Section("Alerts")
   Check(p, "Alert when I target or mouse over a teacher", "alertTarget", 4, y, "Big on-screen message when a beast you can tame teaches something you need.")
@@ -1313,6 +1313,7 @@ do
   function p.Refresh()
     if not p:IsShown() then return end
     mmCheck:SetChecked(not ns.db.minimap.hide)
+    ShowRouteColor()
     for i, a in ipairs(Geo.AddonStatus()) do
       local r = addonRows[i]
       r.dot:SetTexture(a.on and "Interface\\COMMON\\Indicator-Green" or "Interface\\COMMON\\Indicator-Gray")

@@ -404,15 +404,28 @@ local function Dot()
   local d = table.remove(dotPool)
   if d then return d end
   d = CreateFrame("Frame", nil, UIParent)
-  d:SetSize(7, 7)
-  d.tex = d:CreateTexture(nil, "OVERLAY")
+  d:SetSize(6, 6)
+  -- dark outline so the dot stays visible on any map color
+  d.edge = d:CreateTexture(nil, "BACKGROUND")
+  d.edge:SetPoint("TOPLEFT", -1, 1)
+  d.edge:SetPoint("BOTTOMRIGHT", 1, -1)
+  d.edge:SetColorTexture(0, 0, 0, 1)
+  d.tex = d:CreateTexture(nil, "ARTWORK")
   d.tex:SetAllPoints()
-  d.tex:SetTexture("Interface\CHARACTERFRAME\TempPortraitAlphaMask") -- round dot
   return d
 end
 
--- Dotted line between stops, drawn as small map pins (positioned by
--- HereBeDragons, so it lines up on zone and continent maps alike).
+local function PlaceDot(r, g, b, a, add)
+  local d = Dot()
+  d.tex:SetColorTexture(r, g, b, 1)
+  d.edge:SetAlpha(0.6)
+  d:SetAlpha(a)
+  add(d)
+  dotUsed[#dotUsed + 1] = d
+end
+
+-- Dotted line between stops, drawn as small map pins placed by
+-- HereBeDragons (the same way as the numbered stop pins).
 function Geo.DrawRoute()
   if mapInfo then
     mapInfo:SetShown(#Geo.route > 0)
@@ -423,22 +436,31 @@ function Geo.DrawRoute()
   if Libs() then HBDPins:RemoveAllWorldMapIcons(REF_DOTS) end
   for _, d in ipairs(dotUsed) do d:Hide(); dotPool[#dotPool + 1] = d end
   wipe(dotUsed)
-  if not HBD or #Geo.route < 2 or Opt("routeLines") == false then return end
+  if not Libs() or #Geo.route < 2 or Opt("routeLines") == false then return end
 
   local r, g, b, a = Geo.RouteColor()
   for i = 2, #Geo.route do
     local s1, s2 = Geo.route[i - 1], Geo.route[i]
-    local x1, y1, inst1 = HBD:GetWorldCoordinatesFromZone(s1.x, s1.y, s1.map)
-    local x2, y2, inst2 = HBD:GetWorldCoordinatesFromZone(s2.x, s2.y, s2.map)
-    if x1 and x2 and inst1 == inst2 then
-      local dist = math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2) -- yards
-      local n = math.max(3, math.min(60, math.floor(dist / 20)))
+    -- dots per leg: about one every 20 yards, 3 to 60
+    local yards = HBD and HBD.GetZoneDistance and HBD:GetZoneDistance(s1.map, s1.x, s1.y, s2.map, s2.x, s2.y)
+    local n = yards and math.max(3, math.min(60, math.floor(yards / 20))) or 20
+    if s1.map == s2.map then
       for k = 1, n - 1 do -- skip the ends, the numbered stops sit there
         local t = k / n
-        local d = Dot()
-        d.tex:SetVertexColor(r, g, b, a)
-        HBDPins:AddWorldMapIconWorld(REF_DOTS, d, inst1, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, 3)
-        dotUsed[#dotUsed + 1] = d
+        PlaceDot(r, g, b, a, function(d)
+          HBDPins:AddWorldMapIconMap(REF_DOTS, d, s1.map, s1.x + (s2.x - s1.x) * t, s1.y + (s2.y - s1.y) * t, 3)
+        end)
+      end
+    elseif HBD then
+      local x1, y1, inst1 = HBD:GetWorldCoordinatesFromZone(s1.x, s1.y, s1.map)
+      local x2, y2, inst2 = HBD:GetWorldCoordinatesFromZone(s2.x, s2.y, s2.map)
+      if x1 and x2 and inst1 == inst2 then
+        for k = 1, n - 1 do
+          local t = k / n
+          PlaceDot(r, g, b, a, function(d)
+            HBDPins:AddWorldMapIconWorld(REF_DOTS, d, inst1, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, 3)
+          end)
+        end
       end
     end
   end
