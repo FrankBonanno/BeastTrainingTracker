@@ -48,7 +48,7 @@ local P = {
   { "Uhk'loc", "Gorilla", "52", "Un'Goro Crater", nil, "RU" },
   { "Giggler", "Hyena", "34", "Desolace", 2.0, "R" },
   { "Murderous Blisterpaw", "Hyena", "43", "Tanaris", 2.0, "R" },
-  { "Snort The Heckler", "Hyena", "17", "The Barrens", nil, "R" },
+  { "Snort the Heckler", "Hyena", "17", "The Barrens", nil, "R" },
   { "Ravage", "Hyena", "51", "Blasted Lands", 1.3, "R" },
   { "Takk the Leaper", "Raptor", "19", "The Barrens", 2.0, "RE" },
   { "Dart", "Raptor", "38", "Dustwallow Marsh", 2.0, "R" },
