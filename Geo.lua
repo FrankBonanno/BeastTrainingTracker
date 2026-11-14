@@ -400,21 +400,33 @@ function Geo.RouteColor()
   return c.r, c.g, c.b, o.routeAlpha or Geo.ROUTE_DEFAULT.a
 end
 
+local CIRCLE = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMask"
+
+-- clip a texture to a circle (falls back to a square if masks aren't supported)
+local function Round(frame, tex)
+  if not frame.CreateMaskTexture or not tex.AddMaskTexture then return end
+  local m = frame:CreateMaskTexture()
+  m:SetTexture(CIRCLE, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+  m:SetAllPoints(tex)
+  tex:AddMaskTexture(m)
+end
+
 local function Dot()
   local d = table.remove(dotPool)
   if d then return d end
   d = CreateFrame("Frame", nil, UIParent)
-  d:SetSize(6, 6)
+  d:SetSize(8, 8)
   -- dark outline so the dot stays visible on any map color
   d.edge = d:CreateTexture(nil, "BACKGROUND")
-  d.edge:SetPoint("TOPLEFT", -1, 1)
-  d.edge:SetPoint("BOTTOMRIGHT", 1, -1)
+  d.edge:SetPoint("TOPLEFT", -1.5, 1.5)
+  d.edge:SetPoint("BOTTOMRIGHT", 1.5, -1.5)
   d.edge:SetColorTexture(0, 0, 0, 1)
+  Round(d, d.edge)
   d.tex = d:CreateTexture(nil, "ARTWORK")
   d.tex:SetAllPoints()
+  Round(d, d.tex)
   return d
 end
-
 local function PlaceDot(r, g, b, a, add)
   local d = Dot()
   d.tex:SetColorTexture(r, g, b, 1)
@@ -441,9 +453,9 @@ function Geo.DrawRoute()
   local r, g, b, a = Geo.RouteColor()
   for i = 2, #Geo.route do
     local s1, s2 = Geo.route[i - 1], Geo.route[i]
-    -- dots per leg: about one every 20 yards, 3 to 60
+    -- dots per leg: about one every 60 yards, 3 to 25
     local yards = HBD and HBD.GetZoneDistance and HBD:GetZoneDistance(s1.map, s1.x, s1.y, s2.map, s2.x, s2.y)
-    local n = yards and math.max(3, math.min(60, math.floor(yards / 20))) or 20
+    local n = yards and math.max(3, math.min(25, math.floor(yards / 60))) or 10
     if s1.map == s2.map then
       for k = 1, n - 1 do -- skip the ends, the numbered stops sit there
         local t = k / n
