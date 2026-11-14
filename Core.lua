@@ -346,10 +346,71 @@ function ns.Counts()
   return known, total
 end
 
+-- Recommended level range per zone (Classic). Zones not listed (Forever's
+-- own zones, dungeons) use the level range of the beasts that live there.
+local ZONE_LEVELS = {
+  ["Elwynn Forest"] = { 1, 10 }, ["Dun Morogh"] = { 1, 10 }, ["Tirisfal Glades"] = { 1, 10 },
+  ["Durotar"] = { 1, 10 }, ["Mulgore"] = { 1, 10 }, ["Teldrassil"] = { 1, 10 },
+  ["Westfall"] = { 10, 20 }, ["Loch Modan"] = { 10, 20 }, ["Silverpine Forest"] = { 10, 20 },
+  ["Darkshore"] = { 10, 20 }, ["The Barrens"] = { 10, 25 }, ["Redridge Mountains"] = { 15, 25 },
+  ["Stonetalon Mountains"] = { 15, 27 }, ["Ashenvale"] = { 18, 30 }, ["Duskwood"] = { 18, 30 },
+  ["Hillsbrad Foothills"] = { 20, 30 }, ["Wetlands"] = { 20, 30 }, ["Thousand Needles"] = { 25, 35 },
+  ["Alterac Mountains"] = { 30, 40 }, ["Arathi Highlands"] = { 30, 40 }, ["Desolace"] = { 30, 40 },
+  ["Stranglethorn Vale"] = { 30, 45 }, ["Dustwallow Marsh"] = { 35, 45 }, ["Badlands"] = { 35, 45 },
+  ["Swamp of Sorrows"] = { 35, 45 }, ["Feralas"] = { 40, 50 }, ["The Hinterlands"] = { 40, 50 },
+  ["Tanaris"] = { 40, 50 }, ["Searing Gorge"] = { 43, 50 }, ["Azshara"] = { 45, 55 },
+  ["Blasted Lands"] = { 45, 55 }, ["Un'Goro Crater"] = { 48, 55 }, ["Felwood"] = { 48, 55 },
+  ["Burning Steppes"] = { 50, 58 }, ["Western Plaguelands"] = { 51, 58 }, ["Eastern Plaguelands"] = { 53, 60 },
+  ["Winterspring"] = { 55, 60 }, ["Deadwind Pass"] = { 55, 60 }, ["Silithus"] = { 55, 60 },
+}
+
+local zoneCache = {}
+
+-- "The Tundrid Hills, Dun Morogh" -> "Dun Morogh"; "Kraul (Dungeon)" -> "Kraul"
+local function BaseZone(zone)
+  local z = (zone or ""):match("([^,]+)$") or zone or ""
+  return (z:gsub("%s*%b()", ""):match("^%s*(.-)%s*$"))
+end
+
+-- min, max recommended level for a zone name
+function ns.ZoneLevels(zone)
+  local c = zoneCache[zone]
+  if c then return c[1], c[2] end
+  local known = ZONE_LEVELS[BaseZone(zone)]
+  local lo, hi
+  if known then
+    lo, hi = known[1], known[2]
+  else
+    -- from the beasts that live there
+    for _, ab in ipairs(abilities) do
+      for _, r in ipairs(ab.parsed) do
+        for _, t in ipairs(r.teachers) do
+          if BaseZone(t.zone) == BaseZone(zone) then
+            local a = t.minLevel
+            local b = tonumber(t.level:match("(%d+)%s*$")) or a
+            lo = (not lo or a < lo) and a or lo
+            hi = (not hi or b > hi) and b or hi
+          end
+        end
+      end
+    end
+    for _, p in ipairs(ns.rarePets or {}) do
+      if BaseZone(p.zone) == BaseZone(zone) then
+        local b = tonumber(p.level:match("(%d+)%s*$")) or p.minLevel
+        lo = (not lo or p.minLevel < lo) and p.minLevel or lo
+        hi = (not hi or b > hi) and b or hi
+      end
+    end
+  end
+  zoneCache[zone] = { lo or 0, hi or lo or 0 }
+  return zoneCache[zone][1], zoneCache[zone][2]
+end
+
 -- Missing ranks you can tame right now, grouped by zone.
 -- Only the highest missing rank per ability counts (it covers the lower ones).
--- Returns { {zone=, entries={ {ab=, rank=, teachers={...}} }, levelSum=} }, best first.
-function ns.HuntPlan(petOnly, dungeons)
+-- Returns { {zone=, entries={ {ab=, rank=, teachers={...}} }, levelSum=, minLevel=, maxLevel=} }.
+-- sortBy "count": most new ranks first; otherwise by zone level, lowest first.
+function ns.HuntPlan(petOnly, dungeons, sortBy)
   local fam = ns.PetFamily()
   local zones = {}
   for _, ab in ipairs(abilities) do
@@ -382,13 +443,22 @@ function ns.HuntPlan(petOnly, dungeons)
     end
     table.sort(z.entries, function(a, b) return a.ab.name < b.ab.name end)
     z.here = here ~= "" and z.zone:find(here, 1, true) ~= nil
+    z.minLevel, z.maxLevel = ns.ZoneLevels(z.zone)
     out[#out + 1] = z
   end
-  table.sort(out, function(a, b)
-    if #a.entries ~= #b.entries then return #a.entries > #b.entries end
-    if a.levelSum ~= b.levelSum then return a.levelSum > b.levelSum end
-    return a.zone < b.zone
-  end)
+  if sortBy == "count" then
+    table.sort(out, function(a, b)
+      if #a.entries ~= #b.entries then return #a.entries > #b.entries end
+      if a.levelSum ~= b.levelSum then return a.levelSum > b.levelSum end
+      return a.zone < b.zone
+    end)
+  else
+    table.sort(out, function(a, b)
+      if a.minLevel ~= b.minLevel then return a.minLevel < b.minLevel end
+      if a.maxLevel ~= b.maxLevel then return a.maxLevel < b.maxLevel end
+      return a.zone < b.zone
+    end)
+  end
   return out
 end
 
@@ -554,7 +624,7 @@ local DEFAULTS = {
   -- ability list
   petOnly = false, hideKnown = false, hideTrainer = false, hideHigh = false, zoneOnly = false,
   -- hunt planner
-  huntPetOnly = false, huntDungeons = false,
+  huntPetOnly = false, huntDungeons = false, huntSortCount = false,
   -- map & alerts
   mapPins = true, minimapPins = true, pinsOff = false, learnToast = true, routeOpenMap = true, routeLines = true,
   -- rare pets

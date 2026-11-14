@@ -838,6 +838,7 @@ do
   intro:SetWidth(WIDTH - 40)
   Check(p, "My pet's family only", "huntPetOnly", 2, -26, "Only count abilities your current pet's family can use.")
   Check(p, "Include dungeons", "huntDungeons", 170, -26, "Also count beasts that live inside dungeons.")
+  Check(p, "Sort by most new ranks", "huntSortCount", 310, -26, "Show the zones with the most new ranks first, instead of lowest level first.")
   local clear = Button(p, "Clear my waypoints", 140, function() Geo.ClearWaypoints() end)
   clear:SetPoint("TOPRIGHT", -4, -26)
   Divider(p, -54)
@@ -866,21 +867,26 @@ do
   function p.Refresh()
     if not p:IsShown() then return end
     local o = ns.db.opts
-    intro:SetText(("Zones where you can tame the most missing ranks at |cffffffffyour level (%d)|r. " ..
-      "Only the highest missing rank of each ability is counted - it covers the lower ones."):format(ns.PlayerLevel()))
-    local plan = ns.HuntPlan(o.huntPetOnly, o.huntDungeons)
+    intro:SetText(("Zones with ranks you can tame at |cffffffffyour level (%d)|r, %s. " ..
+      "Only the highest missing rank of each ability is counted - it covers the lower ones."):format(ns.PlayerLevel(),
+      o.huntSortCount and "most new ranks first" or "lowest level first"))
+    local plan = ns.HuntPlan(o.huntPetOnly, o.huntDungeons, o.huntSortCount and "count" or "level")
     local items = {}
+    local lvl = ns.PlayerLevel()
 
-    for i, z in ipairs(plan) do
-      if i > 12 then break end
+    for _, z in ipairs(plan) do
       local n = #z.entries
+      -- level range: grey = outlevelled, green = your level, orange = above you
+      local rc = (z.maxLevel < lvl) and "|cff9d9d9d" or ((z.minLevel > lvl) and "|cffff9040" or GREEN)
+      local range = z.minLevel > 0 and ("  %s(%d-%d)|r"):format(rc, z.minLevel, z.maxLevel) or ""
       items[#items + 1] = {
         kind = "head",
-        left = ("%s#%d|r  %s%s|r"):format(GOLD, i, z.here and GREEN or "|cffffffff", z.zone),
+        left = ("%s%s|r%s"):format(z.here and GREEN or "|cffffffff", z.zone, range),
         right = ("%s%d new rank%s|r%s"):format(GREEN, n, n == 1 and "" or "s", z.here and "  |cff40ff40(you're here)|r" or ""),
         button = { text = "Waypoints", onClick = function() Geo.WaypointMany(WaypointItems(z.entries)) end },
         tip = function(tt)
           tt:AddLine(z.zone, 1, 0.82, 0)
+          if z.minLevel > 0 then tt:AddLine(("Recommended level %d-%d"):format(z.minLevel, z.maxLevel), 0.8, 0.8, 0.8) end
           for _, e in ipairs(z.entries) do tt:AddLine(("%s %d"):format(e.ab.name, e.rank.rank), 1, 1, 1) end
           tt:AddLine(" ")
           tt:AddLine("Waypoints: mark these beasts (TomTom arrows if installed)", 0.5, 0.5, 0.5)
@@ -1480,7 +1486,7 @@ if LDB then
       else
         tt:AddLine("Nothing new to tame in this zone", 0.6, 0.6, 0.6)
       end
-      local plan = ns.HuntPlan(ns.db.opts.huntPetOnly, ns.db.opts.huntDungeons)
+      local plan = ns.HuntPlan(ns.db.opts.huntPetOnly, ns.db.opts.huntDungeons, "count")
       if plan[1] then
         tt:AddDoubleLine("Best next hunt", ("%s (%d)"):format(plan[1].zone, #plan[1].entries), 1, 0.82, 0, 1, 1, 1)
       end

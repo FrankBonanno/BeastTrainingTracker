@@ -190,7 +190,7 @@ end)
 test("hunt plan: only tameable, non-dungeon, highest missing rank per ability", function()
   local ns = H.load()
   H.state.level = 12
-  local plan = ns.HuntPlan(false, false)
+  local plan = ns.HuntPlan(false, false, "count")
   ok(#plan > 0, "empty hunt plan at level 12")
   for i, z in ipairs(plan) do
     if i > 1 then ok(#plan[i - 1].entries >= #z.entries, "zones not sorted by count") end
@@ -219,6 +219,29 @@ test("hunt plan: only tameable, non-dungeon, highest missing rank per ability", 
   for _, r in ipairs(ns.byName.Bite.parsed) do ns.db.known["Bite#" .. r.rank] = true end
   for _, z in ipairs(ns.HuntPlan(false, false)) do
     for _, e in ipairs(z.entries) do ok(e.ab.name ~= "Bite", "learned ability still in the plan") end
+  end
+end)
+
+test("zone levels: known Classic ranges, subzones, and Forever zones from beast levels", function()
+  local ns = H.load()
+  local lo, hi = ns.ZoneLevels("Silverpine Forest")
+  eq(lo, 10) eq(hi, 20)
+  lo, hi = ns.ZoneLevels("The Tundrid Hills, Dun Morogh")
+  eq(lo, 1) eq(hi, 10)
+  lo, hi = ns.ZoneLevels("Zephras Isle")
+  ok(lo > 0 and hi >= lo, "Zephras Isle range should come from its beasts")
+  lo, hi = ns.ZoneLevels("Razorfen Kraul (Dungeon)")
+  ok(lo > 0 and hi >= lo, "dungeon range should come from its beasts")
+end)
+
+test("hunt plan: lowest level zones first by default", function()
+  local ns = H.load()
+  H.state.level = 30
+  local plan = ns.HuntPlan(false, false)
+  ok(#plan > 1, "need at least two zones")
+  for i = 2, #plan do
+    ok(plan[i - 1].minLevel <= plan[i].minLevel, ("%s (%d) listed before %s (%d)"):format(
+      plan[i - 1].zone, plan[i - 1].minLevel, plan[i].zone, plan[i].minLevel))
   end
 end)
 
