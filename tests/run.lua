@@ -493,6 +493,17 @@ test("route: removing a stop keeps the rest", function()
   eq(#ns.Geo.route, 0, "removing the last stop should clear the route")
 end)
 
+test("route: dotted line color has a visible default and can be changed", function()
+  local ns = H.load()
+  local r, g, b, a = ns.Geo.RouteColor()
+  eq(r, 0.1) eq(g, 0.85) eq(b, 1.0) eq(a, 0.9)
+  ns.db.opts.routeColor = { r = 1, g = 0, b = 0 }
+  ns.db.opts.routeAlpha = 0.5
+  r, g, b, a = ns.Geo.RouteColor()
+  eq(r, 1) eq(g, 0) eq(b, 0) eq(a, 0.5)
+  ns.Geo.DrawRoute() -- no map library loaded: must not error
+end)
+
 test("route: TomTom gets one waypoint per stop", function()
   local ns = H.load()
   local added, removed = 0, 0

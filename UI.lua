@@ -1189,8 +1189,88 @@ do
   Check(p, "Show untamed special pets on the map", "rarePins", 300, y, "Pins for untamed rares (and outdoor elites / quest spawns) you can tame, even if they teach nothing you need.")
   y = y - 24
   Check(p, "Open the map on the first waypoint", "routeOpenMap", 4, y, "When you set waypoints, open the world map on the first stop (not in combat).")
-  Check(p, "Draw the hunt route on the world map", "routeLines", 300, y, "Numbered stops joined by lines, nearest first. Legs you've walked are dimmed.", function() ns.Geo.DrawRoute() end)
-  y = y - 30
+  Check(p, "Draw the hunt route on the world map", "routeLines", 300, y, "Numbered stops joined by a dotted line, nearest first. Pick the color and opacity below.", function() ns.Geo.DrawRoute() end)
+  y = y - 26
+
+  -- Route line color + opacity
+  local colorLabel = Text(p, "GameFontHighlightSmall", 10, y - 5, "Route line color")
+  local swatch = CreateFrame("Button", nil, p, BackdropTemplateMixin and "BackdropTemplate" or nil)
+  swatch:SetSize(20, 20)
+  swatch:SetPoint("LEFT", colorLabel, "RIGHT", 8, 0)
+  if swatch.SetBackdrop then
+    swatch:SetBackdrop({ edgeFile = "Interface\Tooltips\UI-Tooltip-Border", edgeSize = 8 })
+    swatch:SetBackdropBorderColor(0.8, 0.8, 0.8, 1)
+  end
+  swatch.color = swatch:CreateTexture(nil, "ARTWORK")
+  swatch.color:SetPoint("TOPLEFT", 3, -3)
+  swatch.color:SetPoint("BOTTOMRIGHT", -3, 3)
+
+  local function SetRouteColor(r, g, b)
+    ns.db.opts.routeColor = { r = r, g = g, b = b }
+    swatch.color:SetColorTexture(r, g, b, 1)
+    ns.Geo.DrawRoute()
+  end
+
+  swatch:SetScript("OnClick", function()
+    local r, g, b = ns.Geo.RouteColor()
+    local function apply() SetRouteColor(ColorPickerFrame:GetColorRGB()) end
+    local function cancel() SetRouteColor(r, g, b) end
+    if ColorPickerFrame.SetupColorPickerAndShow then
+      ColorPickerFrame:SetupColorPickerAndShow({ r = r, g = g, b = b, hasOpacity = false, swatchFunc = apply, cancelFunc = cancel })
+    else
+      ColorPickerFrame.hasOpacity = false
+      ColorPickerFrame.opacityFunc = nil
+      ColorPickerFrame.previousValues = { r, g, b }
+      ColorPickerFrame.func = apply
+      ColorPickerFrame.cancelFunc = cancel
+      ColorPickerFrame:SetColorRGB(r, g, b)
+      ColorPickerFrame:Hide()
+      ColorPickerFrame:Show()
+    end
+  end)
+  swatch:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:AddLine("Route line color", 1, 0.82, 0)
+    GameTooltip:AddLine("Click to pick the color of the dotted hunt route on the world map.", 1, 1, 1, true)
+    GameTooltip:Show()
+  end)
+  swatch:SetScript("OnLeave", GameTooltip_Hide)
+
+  local alpha = CreateFrame("Slider", "BeastTrainingTrackerRouteAlpha", p, "OptionsSliderTemplate")
+  alpha:SetWidth(160)
+  alpha:SetPoint("LEFT", swatch, "RIGHT", 70, 0)
+  alpha:SetMinMaxValues(0.1, 1)
+  alpha:SetValueStep(0.05)
+  if alpha.SetObeyStepOnDrag then alpha:SetObeyStepOnDrag(true) end
+  local low = alpha.Low or _G["BeastTrainingTrackerRouteAlphaLow"]
+  local high = alpha.High or _G["BeastTrainingTrackerRouteAlphaHigh"]
+  local label = alpha.Text or _G["BeastTrainingTrackerRouteAlphaText"]
+  if low then low:SetText("10%") end
+  if high then high:SetText("100%") end
+  alpha:SetScript("OnValueChanged", function(self, v)
+    v = math.floor(v * 20 + 0.5) / 20
+    if label then label:SetText(("Opacity: %d%%"):format(v * 100)) end
+    if ns.db and ns.db.opts.routeAlpha ~= v then
+      ns.db.opts.routeAlpha = v
+      ns.Geo.DrawRoute()
+    end
+  end)
+
+  local resetColor = Button(p, "Default", 80, function()
+    local d = ns.Geo.ROUTE_DEFAULT
+    ns.db.opts.routeAlpha = d.a
+    alpha:SetValue(d.a)
+    SetRouteColor(d.r, d.g, d.b)
+  end)
+  resetColor:SetPoint("LEFT", alpha, "RIGHT", 24, 0)
+
+  -- show current values whenever Settings opens
+  p:HookScript("OnShow", function()
+    local r, g, b, a = ns.Geo.RouteColor()
+    swatch.color:SetColorTexture(r, g, b, 1)
+    alpha:SetValue(a)
+  end)
+  y = y - 34
 
   Section("Alerts")
   Check(p, "Alert when I target or mouse over a teacher", "alertTarget", 4, y, "Big on-screen message when a beast you can tame teaches something you need.")

@@ -388,54 +388,59 @@ end
 ------------------------------------------------------------------------
 -- Route lines on the world map
 ------------------------------------------------------------------------
-local lineFrame, lines = nil, {}
-local mapInfo  -- "Hunt route: 3 stops [Clear]" box on the world map
+local mapInfo  -- "Beast hunt: stop 1 of 3 [Clear]" box on the world map
+local REF_DOTS = "BeastTrainingTrackerRouteDots"
+local dotPool, dotUsed = {}, {}
 
-local function Canvas()
-  return WorldMapFrame and WorldMapFrame.ScrollContainer and WorldMapFrame.ScrollContainer.Child
+-- Route line color + opacity (Settings). Default: bright cyan, stands out on every map.
+Geo.ROUTE_DEFAULT = { r = 0.1, g = 0.85, b = 1.0, a = 0.9 }
+function Geo.RouteColor()
+  local o = ns.db and ns.db.opts or {}
+  local c = o.routeColor or Geo.ROUTE_DEFAULT
+  return c.r, c.g, c.b, o.routeAlpha or Geo.ROUTE_DEFAULT.a
 end
 
-function Geo.DrawRoute()
-  local canvas = Canvas()
-  if not canvas then return end
-  if not lineFrame then
-    lineFrame = CreateFrame("Frame", nil, canvas)
-    lineFrame:SetAllPoints(canvas)
-  end
-  lineFrame:SetFrameLevel(canvas:GetFrameLevel() + 1)
-  for _, l in ipairs(lines) do l:Hide() end
+local function Dot()
+  local d = table.remove(dotPool)
+  if d then return d end
+  d = CreateFrame("Frame", nil, UIParent)
+  d:SetSize(7, 7)
+  d.tex = d:CreateTexture(nil, "OVERLAY")
+  d.tex:SetAllPoints()
+  d.tex:SetTexture("Interface\CHARACTERFRAME\TempPortraitAlphaMask") -- round dot
+  return d
+end
 
-  -- info box with a Clear button
+-- Dotted line between stops, drawn as small map pins (positioned by
+-- HereBeDragons, so it lines up on zone and continent maps alike).
+function Geo.DrawRoute()
   if mapInfo then
     mapInfo:SetShown(#Geo.route > 0)
-    mapInfo.text:SetText(("|cffabd473Beast hunt:|r stop %d of %d"):format(math.max(Geo.current, 1), #Geo.route))
+    mapInfo.text:SetText(("|cffabd473Beast hunt:|r %d stop%s"):format(#Geo.route, #Geo.route == 1 and "" or "s"))
     mapInfo:SetWidth(mapInfo.text:GetStringWidth() + 90)
   end
 
-  if not Libs() or not HBD or not WorldMapFrame:IsShown() or #Geo.route < 2 or Opt("routeLines") == false then return end
-  local mapID = WorldMapFrame:GetMapID()
-  local w, h = canvas:GetWidth(), canvas:GetHeight()
-  local scale = canvas:GetScale() > 0 and canvas:GetScale() or 1
-  local prev, n = nil, 0
-  for i, s in ipairs(Geo.route) do
-    local x, y = s.x, s.y
-    if s.map ~= mapID then x, y = HBD:TranslateZoneCoordinates(s.x, s.y, s.map, mapID, true) end
-    local pt = (x and y) and { x * w, y * h } or nil
-    if prev and pt then
-      n = n + 1
-      local l = lines[n]
-      if not l then
-        l = lineFrame:CreateLine(nil, "OVERLAY")
-        lines[n] = l
+  if Libs() then HBDPins:RemoveAllWorldMapIcons(REF_DOTS) end
+  for _, d in ipairs(dotUsed) do d:Hide(); dotPool[#dotPool + 1] = d end
+  wipe(dotUsed)
+  if not HBD or #Geo.route < 2 or Opt("routeLines") == false then return end
+
+  local r, g, b, a = Geo.RouteColor()
+  for i = 2, #Geo.route do
+    local s1, s2 = Geo.route[i - 1], Geo.route[i]
+    local x1, y1, inst1 = HBD:GetWorldCoordinatesFromZone(s1.x, s1.y, s1.map)
+    local x2, y2, inst2 = HBD:GetWorldCoordinatesFromZone(s2.x, s2.y, s2.map)
+    if x1 and x2 and inst1 == inst2 then
+      local dist = math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2) -- yards
+      local n = math.max(3, math.min(60, math.floor(dist / 20)))
+      for k = 1, n - 1 do -- skip the ends, the numbered stops sit there
+        local t = k / n
+        local d = Dot()
+        d.tex:SetVertexColor(r, g, b, a)
+        HBDPins:AddWorldMapIconWorld(REF_DOTS, d, inst1, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, 3)
+        dotUsed[#dotUsed + 1] = d
       end
-      l:SetThickness(4 / scale)
-      -- legs you've already walked are dimmed
-      if i <= Geo.current then l:SetColorTexture(1, 0.82, 0, 0.3) else l:SetColorTexture(1, 0.82, 0, 0.9) end
-      l:SetStartPoint("TOPLEFT", lineFrame, prev[1], -prev[2])
-      l:SetEndPoint("TOPLEFT", lineFrame, pt[1], -pt[2])
-      l:Show()
     end
-    prev = pt
   end
 end
 
@@ -444,8 +449,6 @@ local function HookWorldMap()
   if hooked or not WorldMapFrame then return end
   hooked = true
   WorldMapFrame:HookScript("OnShow", Geo.DrawRoute)
-  if WorldMapFrame.OnMapChanged then hooksecurefunc(WorldMapFrame, "OnMapChanged", Geo.DrawRoute) end
-  if WorldMapFrame.OnCanvasScaleChanged then hooksecurefunc(WorldMapFrame, "OnCanvasScaleChanged", Geo.DrawRoute) end
 
   local parent = WorldMapFrame.ScrollContainer or WorldMapFrame
   mapInfo = CreateFrame("Frame", nil, parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
@@ -550,7 +553,7 @@ local function ShowRoute()
         end
         p.stop = s
         p.num:SetText(i)
-        p.border:SetColorTexture(1, 0.82, 0, i < Geo.current and 0.4 or 1)
+        p.border:SetColorTexture(1, 0.82, 0, 1)
         HBDPins:AddWorldMapIconMap(REF_ROUTE, p, s.map, s.x, s.y, 3)
       end
     end
