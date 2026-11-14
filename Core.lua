@@ -649,7 +649,7 @@ local DEFAULTS = {
   petOnly = false, hideKnown = false, hideTrainer = false, hideHigh = false, zoneOnly = false,
   -- hunt planner
   huntPetOnly = false, huntDungeons = false, huntSortCount = false, huntBothFactions = false,
-  hideQuestieWarning = false,
+  hideQuestieWarning = false, huntHereFirst = true,
   -- map & alerts
   mapPins = true, minimapPins = true, pinsOff = false, learnToast = true, routeOpenMap = true, routeLines = true,
   -- rare pets

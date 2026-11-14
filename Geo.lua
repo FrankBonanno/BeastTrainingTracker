@@ -600,7 +600,7 @@ local function HookWorldMap()
   local parent = WorldMapFrame.ScrollContainer or WorldMapFrame
   mapInfo = CreateFrame("Frame", nil, parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
   mapInfo:SetSize(220, 26)
-  mapInfo:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -8)
+  mapInfo:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 8, 8) -- other addons crowd the top-left corner
   mapInfo:SetFrameLevel(parent:GetFrameLevel() + 50)
   if mapInfo.SetBackdrop then
     mapInfo:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -830,6 +830,9 @@ function Geo.WaypointMany(list)
   end
   if #noSpot > 0 then
     ns.Say(("  no location known for: %s."):format(table.concat(noSpot, ", ")))
+  end
+  if not Geo.HasQuestie() then
+    ns.Say("  |cffff9040Questie isn't installed, so this route only includes beasts you've spotted yourself - some may be missing.|r")
   end
   return n
 end

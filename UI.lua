@@ -834,15 +834,20 @@ end
 ------------------------------------------------------------------------
 do
   local p = panels[2]
-  local intro = Text(p, "GameFontHighlightSmall", 6, -6)
+  local intro = Text(p, "GameFontHighlightSmall", 6, -4)
   intro:SetWidth(WIDTH - 40)
-  Check(p, "My pet's family only", "huntPetOnly", 2, -26, "Only count abilities your current pet's family can use.")
-  Check(p, "Include dungeons", "huntDungeons", 160, -26, "Also count beasts that live inside dungeons.")
-  Check(p, "Sort by most new ranks", "huntSortCount", 290, -26, "Show the zones with the most new ranks first, instead of lowest level first.")
-  Check(p, "Show enemy faction zones", "huntBothFactions", 470, -26,
+  Check(p, "My pet's family only", "huntPetOnly", 2, -34, "Only count abilities your current pet's family can use.")
+  Check(p, "Include dungeons", "huntDungeons", 160, -34, "Also count beasts that live inside dungeons.")
+  Check(p, "Sort by most new ranks", "huntSortCount", 290, -34, "Show the zones with the most new ranks first, instead of lowest level first.")
+  Check(p, "Show enemy faction zones", "huntBothFactions", 470, -34,
     "Also list zones that belong to the other faction (marked in red). Contested zones are always shown.")
-  Divider(p, -54)
-  local L = MakeList(p, -58, 4)
+  Check(p, "Show my current zone first", "huntHereFirst", 2, -56,
+    "If the zone you're in has something to tame, list it at the top.")
+  local questieNote = Text(p, "GameFontHighlightSmall", 210, -61)
+  questieNote:SetWidth(WIDTH - 250)
+  questieNote:SetWordWrap(false)
+  Divider(p, -82)
+  local L = MakeList(p, -86, 4)
 
   local function TeacherList(e)
     local names = {}
@@ -873,6 +878,19 @@ do
     local plan = ns.HuntPlan(o.huntPetOnly, o.huntDungeons, o.huntSortCount and "count" or "level")
     local items = {}
     local lvl = ns.PlayerLevel()
+    questieNote:SetText(Geo.HasQuestie() and ""
+      or "|cffff9040Questie not installed: routes only include beasts you've spotted yourself.|r")
+
+    -- the zone you're standing in goes first
+    if o.huntHereFirst then
+      for i, z in ipairs(plan) do
+        if z.here then
+          table.remove(plan, i)
+          table.insert(plan, 1, z)
+          break
+        end
+      end
+    end
 
     for _, z in ipairs(plan) do
       local n = #z.entries

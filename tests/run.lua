@@ -642,6 +642,7 @@ test("route: beasts that can't be placed are named in chat", function()
   })
   eq(#ns.Geo.route, 1)
   ok(H.said("no location known for: Mist Creeper"), "missing beast not reported")
+  ok(H.said("Questie isn't installed"), "no Questie warning on the route")
 end)
 
 test("/btt where explains a beast's location sources, any capitalization", function()
