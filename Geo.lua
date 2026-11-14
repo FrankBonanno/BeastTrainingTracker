@@ -415,11 +415,11 @@ local function Dot()
   local d = table.remove(dotPool)
   if d then return d end
   d = CreateFrame("Frame", nil, UIParent)
-  d:SetSize(8, 8)
+  d:SetSize(5, 5)
   -- dark outline so the dot stays visible on any map color
   d.edge = d:CreateTexture(nil, "BACKGROUND")
-  d.edge:SetPoint("TOPLEFT", -1.5, 1.5)
-  d.edge:SetPoint("BOTTOMRIGHT", 1.5, -1.5)
+  d.edge:SetPoint("TOPLEFT", -1, 1)
+  d.edge:SetPoint("BOTTOMRIGHT", 1, -1)
   d.edge:SetColorTexture(0, 0, 0, 1)
   Round(d, d.edge)
   d.tex = d:CreateTexture(nil, "ARTWORK")
@@ -438,6 +438,17 @@ end
 
 -- Dotted line between stops, drawn as small map pins placed by
 -- HereBeDragons (the same way as the numbered stop pins).
+-- Dotted line between stops, evenly spaced on screen like a journey plotter:
+-- recalculated for the map you're looking at and its zoom, so the gaps
+-- stay the same size zoomed in or out.
+local DOT_GAP = 14 -- pixels between dots on screen
+
+local function ClearDots()
+  if Libs() then HBDPins:RemoveAllWorldMapIcons(REF_DOTS) end
+  for _, d in ipairs(dotUsed) do d:Hide(); dotPool[#dotPool + 1] = d end
+  wipe(dotUsed)
+end
+
 function Geo.DrawRoute()
   if mapInfo then
     mapInfo:SetShown(#Geo.route > 0)
@@ -445,37 +456,51 @@ function Geo.DrawRoute()
     mapInfo:SetWidth(mapInfo.text:GetStringWidth() + 90)
   end
 
-  if Libs() then HBDPins:RemoveAllWorldMapIcons(REF_DOTS) end
-  for _, d in ipairs(dotUsed) do d:Hide(); dotPool[#dotPool + 1] = d end
-  wipe(dotUsed)
-  if not Libs() or #Geo.route < 2 or Opt("routeLines") == false then return end
+  ClearDots()
+  if not Libs() or not HBD or #Geo.route < 2 or Opt("routeLines") == false then return end
+  if not (WorldMapFrame and WorldMapFrame:IsShown() and WorldMapFrame.GetMapID) then return end
+  local mapID = WorldMapFrame:GetMapID()
+  local canvas = WorldMapFrame.ScrollContainer and WorldMapFrame.ScrollContainer.Child
+  if not mapID or not canvas then return end
+  -- screen pixels across the whole displayed map
+  local w = canvas:GetWidth() * (canvas:GetScale() or 1)
+  local h = canvas:GetHeight() * (canvas:GetScale() or 1)
+  if not w or w <= 0 or not h or h <= 0 then return end
+
+  -- every stop in the displayed map's coordinates
+  local pts = {}
+  for i, s in ipairs(Geo.route) do
+    if s.map == mapID then
+      pts[i] = { s.x, s.y }
+    else
+      local x, y = HBD:TranslateZoneCoordinates(s.x, s.y, s.map, mapID, true)
+      if x and y then pts[i] = { x, y } end
+    end
+  end
 
   local r, g, b, a = Geo.RouteColor()
   for i = 2, #Geo.route do
-    local s1, s2 = Geo.route[i - 1], Geo.route[i]
-    -- dots per leg: about one every 60 yards, 3 to 25
-    local yards = HBD and HBD.GetZoneDistance and HBD:GetZoneDistance(s1.map, s1.x, s1.y, s2.map, s2.x, s2.y)
-    local n = yards and math.max(3, math.min(25, math.floor(yards / 60))) or 10
-    if s1.map == s2.map then
+    local p1, p2 = pts[i - 1], pts[i]
+    if p1 and p2 then
+      local px = math.sqrt(((p2[1] - p1[1]) * w) ^ 2 + ((p2[2] - p1[2]) * h) ^ 2)
+      local n = math.floor(px / DOT_GAP)
       for k = 1, n - 1 do -- skip the ends, the numbered stops sit there
         local t = k / n
-        PlaceDot(r, g, b, a, function(d)
-          HBDPins:AddWorldMapIconMap(REF_DOTS, d, s1.map, s1.x + (s2.x - s1.x) * t, s1.y + (s2.y - s1.y) * t, 3)
-        end)
-      end
-    elseif HBD then
-      local x1, y1, inst1 = HBD:GetWorldCoordinatesFromZone(s1.x, s1.y, s1.map)
-      local x2, y2, inst2 = HBD:GetWorldCoordinatesFromZone(s2.x, s2.y, s2.map)
-      if x1 and x2 and inst1 == inst2 then
-        for k = 1, n - 1 do
-          local t = k / n
-          PlaceDot(r, g, b, a, function(d)
-            HBDPins:AddWorldMapIconWorld(REF_DOTS, d, inst1, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, 3)
-          end)
+        local x, y = p1[1] + (p2[1] - p1[1]) * t, p1[2] + (p2[2] - p1[2]) * t
+        if x >= 0 and x <= 1 and y >= 0 and y <= 1 then
+          PlaceDot(r, g, b, a, function(d) HBDPins:AddWorldMapIconMap(REF_DOTS, d, mapID, x, y, 0) end)
         end
       end
     end
   end
+end
+
+-- Redraw after map changes / zooming, at most a few times a second
+local redrawQueued
+function Geo.QueueRouteRedraw()
+  if redrawQueued or #Geo.route < 2 then return end
+  redrawQueued = true
+  C_Timer.After(0.3, function() redrawQueued = false; Geo.DrawRoute() end)
 end
 
 local hooked
@@ -483,6 +508,11 @@ local function HookWorldMap()
   if hooked or not WorldMapFrame then return end
   hooked = true
   WorldMapFrame:HookScript("OnShow", Geo.DrawRoute)
+  if WorldMapFrame.OnMapChanged then hooksecurefunc(WorldMapFrame, "OnMapChanged", Geo.QueueRouteRedraw) end
+  if WorldMapFrame.OnCanvasScaleChanged then hooksecurefunc(WorldMapFrame, "OnCanvasScaleChanged", Geo.QueueRouteRedraw) end
+  if WorldMapFrame.ScrollContainer and WorldMapFrame.ScrollContainer.HookScript then
+    WorldMapFrame.ScrollContainer:HookScript("OnMouseWheel", Geo.QueueRouteRedraw)
+  end
 
   local parent = WorldMapFrame.ScrollContainer or WorldMapFrame
   mapInfo = CreateFrame("Frame", nil, parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
