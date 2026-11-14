@@ -436,6 +436,10 @@ for _, t in ipairs(tests) do
   else
     failed = failed + 1
     out("  FAIL  ", t.name, "\n        ", tostring(err), "\n")
+    if os.getenv("GITHUB_ACTIONS") then
+      -- shows up as an annotation on the Actions run page
+      out("::error title=Test failed::", t.name, " - ", (tostring(err):gsub("[\r\n]", " ")), "\n")
+    end
   end
 end
 out(("\n%d tests, %d failed\n"):format(#tests, failed))
