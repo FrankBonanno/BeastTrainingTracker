@@ -1,5 +1,5 @@
-# Beast Training Tracker 1.4.0
+# Beast Training Tracker 1.5.0
 
 ### Added
-- **Pet XP bar:** a thin bar with your hunter pet's experience, under your pet's frame. It shows while your pet is out. Mouse over it for the exact numbers, drag it to move it, and Shift-right-click to snap it back under the pet frame. Turn it off in Settings.
-- Pet XP bar options (right-click the bar, **Customize...** in Settings, or `/btt petxp`): bar color, height, width (or match the pet frame), always-on numbers, lock position, and which parts of the text to show (pet name, level, XP numbers, percent).
+- **Special Pets drawer:** click a pet to slide out a drawer beside the window with a rotating 3D model (drag to turn, mouse wheel to zoom) and everything about it: type, family, level, zone, attack speed, traits, respawn time, what its family can learn, what it teaches, tamed status and RareScanner timers, plus Waypoint and Mark tamed buttons. Shift-click a pet for a waypoint straight away.
+- Respawn times for about 110 special pets, from the CMaNGOS Classic database. These are classic values, so WoW Forever may differ. RareScanner's live timers are shown too when it's installed.

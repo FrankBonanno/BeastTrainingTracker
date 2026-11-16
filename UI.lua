@@ -981,7 +981,7 @@ do
   local L = MakeList(p, headY - 18, 22)
   local footer = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   footer:SetPoint("BOTTOMLEFT", 6, 4)
-  footer:SetText("Click: waypoint  ·  Right-click: mark tamed / not tamed  ·  Right-click with that pet out links it (works after renaming)  ·  Normal speed 2.0")
+  footer:SetText("Click: details & 3D model  ·  Shift-click: waypoint  ·  Right-click: mark tamed / not tamed (with that pet out, links it)  ·  Normal speed 2.0")
 
   local function SpeedCell(speed)
     if not speed then return "|cff808080?|r" end
@@ -990,6 +990,223 @@ do
     if speed > 2.0 then return s .. " |cffff9040slow|r" end
     return s
   end
+
+  ----------------------------------------------------------------------
+  -- Drawer: slides out beside the window with a 3D model and details
+  ----------------------------------------------------------------------
+  local DW = 270
+  local drawer = CreateFrame("Frame", "BeastTrainingTrackerPetDrawer", f, BackdropTemplateMixin and "BackdropTemplate" or nil)
+  drawer:SetSize(DW, HEIGHT - 40)
+  drawer:SetFrameLevel(math.max(0, f:GetFrameLevel() - 1)) -- slides out from behind the window
+  drawer:EnableMouse(true)
+  drawer:Hide()
+  if drawer.SetBackdrop then
+    drawer:SetBackdrop({
+      bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 14,
+      insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    drawer:SetBackdropBorderColor(0.67, 0.83, 0.45, 0.9)
+  end
+  local dClose = CreateFrame("Button", nil, drawer, "UIPanelCloseButton")
+  dClose:SetPoint("TOPRIGHT", -2, -2)
+  dClose:SetScript("OnClick", function() drawer:Hide() end)
+
+  local dName = drawer:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+  dName:SetPoint("TOPLEFT", 14, -14)
+  dName:SetPoint("RIGHT", -30, 0)
+  dName:SetJustifyH("LEFT")
+  local dSub = drawer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  dSub:SetPoint("TOPLEFT", dName, "BOTTOMLEFT", 0, -4)
+  dSub:SetPoint("RIGHT", -14, 0)
+  dSub:SetJustifyH("LEFT")
+
+  -- 3D model: drag to turn, wheel to zoom, slowly spins until you touch it
+  local model = CreateFrame("PlayerModel", nil, drawer)
+  model:SetPoint("TOPLEFT", 10, -56)
+  model:SetPoint("TOPRIGHT", -10, -56)
+  model:SetHeight(220)
+  local modelBg = C(0, 0, 0, 0.35, model:CreateTexture(nil, "BACKGROUND"))
+  modelBg:SetAllPoints()
+  local noModel = model:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+  noModel:SetPoint("CENTER")
+  noModel:SetWidth(DW - 40)
+  local modelHint = drawer:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  modelHint:SetPoint("TOP", model, "BOTTOM", 0, -2)
+  modelHint:SetText("Drag to turn  ·  Mouse wheel to zoom")
+
+  local facing, zoom, spin, dragX = 0, 1, true, nil
+  model:EnableMouse(true)
+  model:EnableMouseWheel(true)
+  model:SetScript("OnMouseDown", function(_, button)
+    if button == "LeftButton" then dragX, spin = GetCursorPosition(), false end
+  end)
+  model:SetScript("OnMouseUp", function() dragX = nil end)
+  model:SetScript("OnMouseWheel", function(self, delta)
+    zoom = math.min(3, math.max(0.4, zoom - delta * 0.15))
+    if self.SetCamDistanceScale then self:SetCamDistanceScale(zoom) end
+  end)
+  model:SetScript("OnUpdate", function(self, elapsed)
+    if dragX then
+      local x = GetCursorPosition()
+      facing = facing + (x - dragX) * 0.02
+      dragX = x
+      self:SetFacing(facing)
+    elseif spin then
+      facing = facing + elapsed * 0.6
+      self:SetFacing(facing)
+    end
+  end)
+
+  -- NPC id: our rare list first, then Questie
+  local function NpcId(name)
+    if ns.rareIds and ns.rareIds[name] then return ns.rareIds[name] end
+    if Geo.HasQuestie() then
+      local ok, ids = pcall(NpcDB.IdsByName, name)
+      if ok and ids and ids[1] then return ids[1] end
+    end
+  end
+
+  local function ShowModel(name)
+    facing, zoom, spin = 0, 1, true
+    model:ClearModel()
+    local id = NpcId(name)
+    if not id or not model.SetCreature then
+      noModel:SetText("No 3D model available for this beast yet." ..
+        (Geo.HasQuestie() and "" or "\n\nInstall Questie to see models of elites and quest spawns."))
+      noModel:Show()
+      return
+    end
+    noModel:Hide()
+    model:SetCreature(id)
+    if model.SetCamDistanceScale then model:SetCamDistanceScale(zoom) end
+    model:SetFacing(facing)
+    -- the creature may not be in your game cache yet; try again shortly
+    if C_Timer then
+      C_Timer.After(0.5, function()
+        if drawer:IsShown() and drawer.name == name then model:SetCreature(id); model:SetFacing(facing) end
+      end)
+    end
+  end
+
+  local dInfo = drawer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  dInfo:SetPoint("TOPLEFT", model, "BOTTOMLEFT", 4, -20)
+  dInfo:SetPoint("RIGHT", -14, 0)
+  dInfo:SetJustifyH("LEFT")
+  dInfo:SetJustifyV("TOP")
+  dInfo:SetSpacing(3)
+
+  local current -- the rare shown in the drawer
+  local dWaypoint = Button(drawer, "Waypoint", 110, function()
+    if not current then return end
+    local e = current.teaches[1]
+    Geo.Waypoint(current.t, e and Geo.Label(e.ab, e.rank, current.t) or current.name)
+  end)
+  dWaypoint:SetPoint("BOTTOMLEFT", 14, 14)
+  local dTamed = Button(drawer, "Mark tamed", 120, function()
+    if current then ns.RS.SetTamed(current.name, not current.tamed) end
+  end)
+  dTamed:SetPoint("BOTTOMRIGHT", -14, 14)
+
+  -- 1800 -> "30m", 37800 -> "10.5h", 129600 -> "36h", 259200 -> "3d"
+  local function Dur(sec)
+    if sec < 3600 then return math.floor(sec / 60 + 0.5) .. "m" end
+    if sec <= 72 * 3600 then
+      local h = math.floor(sec / 1800 + 0.5) / 2
+      return (h == math.floor(h) and tostring(h) or ("%.1f"):format(h)) .. "h"
+    end
+    local d = math.floor(sec / 43200 + 0.5) / 2
+    return (d == math.floor(d) and tostring(d) or ("%.1f"):format(d)) .. "d"
+  end
+
+  local function RespawnLine(r)
+    if r.t.dungeon then return "Respawn: |cffffffffwhen the dungeon resets|r" end
+    local rt = ns.respawnTimes and ns.respawnTimes[r.name]
+    if not rt then return "Respawn: |cff808080unknown|r" end
+    local range = rt[1] == rt[2] and Dur(rt[1]) or (Dur(rt[1]) .. " - " .. Dur(rt[2]))
+    local spots = (rt[3] or 1) > 1 and ("  |cff9d9d9d(%d spawn points)|r"):format(rt[3]) or ""
+    return "Respawn: |cffffffff" .. range .. "|r" .. spots
+  end
+
+  -- Family abilities this beast could learn (skipping the ones every family gets)
+  local function FamilyAbilities(family)
+    local list = {}
+    for _, ab in ipairs(abilities) do
+      if not ab.isAll and ns.AbilityFitsPet(ab, family) then list[#list + 1] = ab.name end
+    end
+    return table.concat(list, ", ")
+  end
+
+  local function FillDrawer(r)
+    current = r
+    local sp = r.t
+    dName:SetText((r.tamed and "|cff9d9d9d" or "|cffff8000") .. r.name .. "|r")
+    dSub:SetText(("%s  ·  %s, level %s\n|cff9d9d9d%s|r"):format(ns.RS.TypeText(sp), sp.family, sp.level, sp.zone))
+    local cur = ns.RS.Info(r.name)
+    local out = { "Attack speed: " .. SpeedCell(r.speed) .. "  |cff9d9d9d(normal 2.0)|r", RespawnLine(r) }
+    for _, tr in ipairs(cur.traits) do out[#out + 1] = "|cffffd14d" .. tr.long .. "|r" end
+    local fam = FamilyAbilities(sp.family)
+    if fam ~= "" then out[#out + 1] = ("Can learn (%s): |cffd0d0d0%s|r"):format(sp.family, fam) end
+    if #r.teaches > 0 then
+      out[#out + 1] = " "
+      for _, e in ipairs(r.teaches) do
+        local k = ns.IsKnown(e.ab, e.rank.rank)
+        out[#out + 1] = (k and "|cff808080" or "|cff40ff40") .. ("Teaches %s %d%s|r"):format(e.ab.name, e.rank.rank, k and " (known)" or "")
+      end
+    end
+    if cur.tamed then
+      out[#out + 1] = " "
+      local nick = ns.db.tamedNicks and ns.db.tamedNicks[r.name]
+      out[#out + 1] = "|cff40ff40" .. (type(cur.tamed) == "number" and ("Tamed " .. date("%b %d, %Y", cur.tamed)) or "Tamed")
+        .. (nick and (" (" .. nick .. ")") or "") .. "|r"
+    elseif not ns.CanTame(sp) then
+      out[#out + 1] = " "
+      out[#out + 1] = ("|cff808080You need level %d to tame it.|r"):format(sp.minLevel)
+    end
+    if cur.status then
+      out[#out + 1] = " "
+      out[#out + 1] = "|cffff9940RareScanner: " .. cur.status.text .. "|r"
+    end
+    local id = NpcId(r.name)
+    if id then
+      out[#out + 1] = " "
+      out[#out + 1] = ("|cff808080NPC ID %d|r"):format(id)
+    end
+    dInfo:SetText(table.concat(out, "\n"))
+    dTamed:SetText(r.tamed and "Mark not tamed" or "Mark tamed")
+  end
+
+  -- Slide out from behind the window, on whichever side has room
+  local slideT
+  local function Anchor(offset)
+    drawer:ClearAllPoints()
+    local right = (f:GetRight() or 0) + DW <= (UIParent:GetRight() or math.huge) / (f:GetEffectiveScale() / UIParent:GetEffectiveScale())
+    if right then
+      drawer:SetPoint("TOPLEFT", f, "TOPRIGHT", offset - DW, -20)
+    else
+      drawer:SetPoint("TOPRIGHT", f, "TOPLEFT", DW - offset, -20)
+    end
+  end
+  drawer:SetScript("OnUpdate", function()
+    if not slideT then return end
+    local t = math.min(1, (GetTime() - slideT) / 0.18)
+    Anchor(DW * (1 - (1 - t) ^ 2)) -- ease out
+    if t >= 1 then slideT = nil end
+  end)
+
+  local function OpenDrawer(r)
+    if drawer:IsShown() and drawer.name == r.name then drawer:Hide() return end -- click again: close
+    local wasOpen = drawer:IsShown()
+    drawer.name = r.name
+    FillDrawer(r)
+    ShowModel(r.name)
+    if wasOpen then return end
+    Anchor(0)
+    slideT = GetTime()
+    drawer:Show()
+  end
+  drawer:SetScript("OnHide", function() drawer.name, current, slideT = nil, nil, nil end)
+  p:HookScript("OnHide", function() drawer:Hide() end)
 
   function p.Refresh()
     if not p:IsShown() then return end
@@ -1036,8 +1253,12 @@ do
           },
           right = status,
           onClick = function()
-            local e = r.teaches[1]
-            Geo.Waypoint(r.t, e and Geo.Label(e.ab, e.rank, r.t) or r.name)
+            if IsShiftKeyDown() then
+              local e = r.teaches[1]
+              Geo.Waypoint(r.t, e and Geo.Label(e.ab, e.rank, r.t) or r.name)
+            else
+              OpenDrawer(r)
+            end
           end,
           onRightClick = function()
             ns.RS.SetTamed(r.name, not r.tamed)
@@ -1064,13 +1285,18 @@ do
               tt:AddLine("RareScanner: " .. cur.status.text, 1, 0.6, 0.25, true)
             end
             tt:AddLine(" ")
-            tt:AddLine("Click: waypoint  ·  Right-click: toggle tamed", 0.5, 0.5, 0.5)
+            tt:AddLine("Click: details & 3D model  ·  Shift-click: waypoint  ·  Right-click: toggle tamed", 0.5, 0.5, 0.5, true)
           end,
         }
       end
     end
     count:SetText(("Tamed |cffffffff%d / %d|r"):format(tamed, #list))
     ListSet(L, items, "Nothing matches these filters.")
+    if drawer:IsShown() then
+      for _, r in ipairs(list) do
+        if r.name == drawer.name then FillDrawer(r) break end
+      end
+    end
   end
   p:SetScript("OnShow", p.Refresh)
 end

@@ -8,7 +8,7 @@ A hunter addon for WoW Forever. It tracks your pet ability ranks, shows which be
 
 - **Abilities:** every pet ability rank, what you've learned, and which beasts teach the rest. Beasts in your current zone are shown in green. Learned ranks sync automatically whenever you open Beast Training, and saved ranks are never overwritten.
 - **Hunt Planner:** the zones where you can tame the most missing ranks at your level.
-- **Special Pets:** rare, elite and quest-spawned pets, with attack speed, unique looks, and a tamed checklist that tracks renamed pets.
+- **Special Pets:** rare, elite and quest-spawned pets, with attack speed, unique looks, and a tamed checklist that tracks renamed pets. Click one for a drawer with its 3D model, respawn time and full details. Respawn times come from the [CMaNGOS Classic database](https://github.com/cmangos/classic-db).
 - **My Pet:** upgrades you can teach, and ranks coming up as your pet levels.
 - **Map pins and waypoints:** beast locations on the world map and minimap. Click a pin for a waypoint.
 - **Alerts:** a popup when a beast that teaches something you need is nearby, and a popup when you learn a new ability.
