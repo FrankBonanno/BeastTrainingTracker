@@ -704,6 +704,8 @@ local DEFAULTS = {
   spShowRare = true, spShowElite = true, spShowSpawned = true, spShowDungeon = false,
   alertTarget = true, alertNameplate = true, alertSound = true, rsHandlesRares = true,
   tracker = true, trackerAutoHide = false,
+  petXpBar = true, petXpHeight = 7, petXpAutoWidth = true, petXpWidth = 160, petXpTextAlways = false, petXpLock = false,
+  petXpShowName = true, petXpShowLevel = true, petXpShowXP = true, petXpShowPct = true,
   upgradeAlert = true, levelNudge = true,
 }
 
@@ -879,6 +881,8 @@ SlashCmdList.BEASTTRAININGTRACKER = function(msg)
     if ns.Geo then ns.Geo.Explain(raw:match("^%S+%s+(.-)$")) end
   elseif msg == "petinfo" then
     if ns.RS then ns.RS.PetInfo() end
+  elseif msg == "petxp" then
+    if ns.TogglePetXPOptions then ns.TogglePetXPOptions() end
   elseif msg == "pins" then
     if ns.Geo then ns.Geo.TogglePins() end
   elseif msg == "rares" then
@@ -926,6 +930,7 @@ SlashCmdList.BEASTTRAININGTRACKER = function(msg)
     Say("/btt - toggle window   /btt abilities | hunt | rarepets | pet | settings | backup - open a tab")
     Say("/btt pins - show/hide all beast pins on the map (same as minimap right-click)")
     Say("/btt tracker - show/hide the zone tracker   /btt minimap - show/hide minimap button")
+    Say("/btt petxp - pet XP bar options")
     Say("/btt clearwp - remove waypoints this addon added   /btt status - saved data info")
     Say("/btt where <beast> - show where a beast's map locations come from")
     Say("/btt rares - rare teachers you still need, with RareScanner timers")

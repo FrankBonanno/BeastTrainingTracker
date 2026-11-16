@@ -28,3 +28,4 @@ Rares.lua
 Alerts.lua
 UI.lua
 Tracker.lua
+PetXP.lua

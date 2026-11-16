@@ -13,6 +13,7 @@ A hunter addon for WoW Forever. It tracks your pet ability ranks, shows which be
 - **Map pins and waypoints:** beast locations on the world map and minimap. Click a pin for a waypoint.
 - **Alerts:** a popup when a beast that teaches something you need is nearby, and a popup when you learn a new ability.
 - **Zone tracker:** a small panel listing what you can tame in your current zone.
+- **Pet XP bar:** a thin bar with your pet's experience, under your pet's frame. Mouse over it for the numbers, and drag it anywhere you like.
 - **Backup:** export and import your learned ranks and tamed pets as text.
 - **Minimap button:** works with minimap-button collector addons. Left-click opens the window, right-click shows or hides map pins, and middle-click toggles the tracker.
 

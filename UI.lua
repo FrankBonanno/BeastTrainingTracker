@@ -1310,6 +1310,10 @@ do
   y = y - 24
   Check(p, "Popup when I learn a new ability", "learnToast", 4, y,
     "On-screen popup (with sound) whenever a new pet ability rank is learned - e.g. from a beast you just tamed.")
+  Check(p, "Show a pet XP bar", "petXpBar", 300, y,
+    "Thin bar with your pet's experience, under your pet's frame. Mouse over it for numbers. Drag to move it, right-click it for options.")
+  local petXpOpts = Button(p, "Customize...", 100, function() if ns.TogglePetXPOptions then ns.TogglePetXPOptions() end end)
+  petXpOpts:SetPoint("TOPRIGHT", -8, y)
   y = y - 30
 
   Section("Zone tracker")
