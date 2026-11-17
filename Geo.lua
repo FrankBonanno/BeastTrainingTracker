@@ -1149,11 +1149,11 @@ zev:SetScript("OnEvent", function(_, e, unit)
   if e == "ADDON_LOADED" then
     if unit == "Blizzard_WorldMap" then HookWorldMap() end
   elseif e == "NAME_PLATE_UNIT_ADDED" then
-    if unit then Geo.RecordSighting(unit) end
+    if unit then pcall(Geo.RecordSighting, unit) end
   elseif e == "PLAYER_TARGET_CHANGED" then
-    Geo.RecordSighting("target")
+    pcall(Geo.RecordSighting, "target")
   elseif e == "UPDATE_MOUSEOVER_UNIT" then
-    Geo.RecordSighting("mouseover")
+    pcall(Geo.RecordSighting, "mouseover")
   else
     Geo.QueuePins(true)
   end

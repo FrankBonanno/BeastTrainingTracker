@@ -718,6 +718,8 @@ local function InitDB()
   BeastTrainingTrackerBackup = BeastTrainingTrackerBackup or {}
   local db = BeastTrainingTrackerDB
   ns.db = db
+  -- Check if player is a hunter (initialize early)
+  ns.isHunter = select(2, UnitClass("player")) == "HUNTER"
   db.known = db.known or {}
   db.manualOff = nil
   db.collapsed = db.collapsed or {}
@@ -795,6 +797,22 @@ for _, e in ipairs({
 ns.loginHooks = {}
 function ns.OnLogin(fn) ns.loginHooks[#ns.loginHooks + 1] = fn end
 
+local function CheckIsHunter()
+  ns.isHunter = select(2, UnitClass("player")) == "HUNTER"
+  if not ns.isHunter then
+    Say("|cffffd100This addon is for Hunters only.|r Disabled on this character.")
+    -- Unregister all events to disable functionality
+    for _, evt in ipairs({
+      "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "NAME_PLATE_UNIT_ADDED", "NAME_PLATE_UNIT_REMOVED",
+      "UNIT_PET", "PET_BAR_UPDATE", "UNIT_LEVEL", "ZONE_CHANGED_NEW_AREA", "TRAINER_SHOW", "TRAINER_UPDATE",
+      "CRAFT_SHOW", "CRAFT_UPDATE", "CHAT_MSG_SYSTEM", "SPELLS_CHANGED", "PLAYER_LEVEL_UP",
+    }) do
+      pcall(ev.UnregisterEvent, ev, evt)
+    end
+  end
+  return ns.isHunter
+end
+
 ev:SetScript("OnEvent", function(_, e, a1)
   if e == "ADDON_LOADED" then
     HookTrainer()
@@ -803,6 +821,7 @@ ev:SetScript("OnEvent", function(_, e, a1)
   elseif not ns.db then
     return
   elseif e == "PLAYER_LOGIN" then
+    if not CheckIsHunter() then return end
     for _, fn in ipairs(ns.loginHooks) do fn() end
     ns.Refresh()
   elseif e == "PLAYER_LOGOUT" then

@@ -278,11 +278,11 @@ end
 ev:SetScript("OnEvent", function(_, e, a1)
   if not ns.db then return end
   if e == "PLAYER_TARGET_CHANGED" then
-    Alert("target", "target")
+    pcall(Alert, "target", "target")
   elseif e == "UPDATE_MOUSEOVER_UNIT" then
-    Alert("mouseover", "mouseover")
+    pcall(Alert, "mouseover", "mouseover")
   elseif e == "NAME_PLATE_UNIT_ADDED" then
-    if a1 then Alert(a1, "nameplate") end
+    if a1 then pcall(Alert, a1, "nameplate") end
   elseif e == "UNIT_PET" then
     if a1 == "player" then
       C_Timer.After(2, function() RememberPetLevel(); ns.CheckUpgrades() end)

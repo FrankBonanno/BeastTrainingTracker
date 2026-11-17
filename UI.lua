@@ -462,7 +462,7 @@ local function RefreshAll()
 end
 
 function ns.ShowTab(i)
-  if not ns.db then return end
+  if not ns.db or not ns.isHunter then return end
   ns.db.tab = i
   for k, b in ipairs(tabs) do
     StyleTab(b, k == i)
@@ -471,7 +471,10 @@ function ns.ShowTab(i)
   if not f:IsShown() then f:Show() else RefreshAll() end
 end
 
-function ns.ToggleMain() f:SetShown(not f:IsShown()) end
+function ns.ToggleMain()
+  if not ns.isHunter then return end
+  f:SetShown(not f:IsShown())
+end
 
 f:SetScript("OnShow", function()
   ns.ShowTab(CurrentTab())
@@ -1449,7 +1452,7 @@ do
   swatch:SetSize(48, 20)
   swatch:SetPoint("LEFT", colorLabel, "RIGHT", 12, 0)
   if swatch.SetBackdrop then
-    swatch:SetBackdrop({ edgeFile = "Interface\Tooltips\UI-Tooltip-Border", edgeSize = 8 })
+    swatch:SetBackdrop({ edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 8 })
     swatch:SetBackdropBorderColor(0.8, 0.8, 0.8, 1)
   end
   swatch.color = swatch:CreateTexture(nil, "ARTWORK")
