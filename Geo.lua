@@ -23,7 +23,30 @@ local mapByName        -- "Duskwood" -> uiMapID
 ------------------------------------------------------------------------
 -- Optional addons
 ------------------------------------------------------------------------
-function Geo.HasQuestie() return _G.NpcDB ~= nil and NpcDB.IdsByName ~= nil end
+function Geo.HasQuestie()
+  -- Check if Questie addon is loaded
+  local questieLoaded = false
+  if C_AddOns and C_AddOns.IsAddOnLoaded then
+    questieLoaded = C_AddOns.IsAddOnLoaded("Questie")
+  elseif IsAddOnLoaded then
+    questieLoaded = IsAddOnLoaded("Questie")
+  end
+
+  -- Check for old Questie API (NpcDB)
+  if _G.NpcDB ~= nil and NpcDB.IdsByName ~= nil then
+    return true
+  end
+
+  -- Check for new Questie v12+ API (QuestieDB)
+  if questieLoaded and _G.QuestieDB ~= nil then
+    local qdb = _G.QuestieDB
+    if qdb.GetUnit or qdb.GetUnits or qdb.GetNPC then
+      return true
+    end
+  end
+
+  return false
+end
 function Geo.HasTomTom() return TomTom and TomTom.AddWaypoint and true or false end
 function Geo.HasRareScanner() return ns.RS and ns.RS.Loaded() or false end
 
@@ -98,7 +121,27 @@ local function QuestieInfo(name)
   local c = qcache[name]
   if c ~= nil then return c or nil end
   local res = { spawns = {} }
-  for _, id in ipairs(NpcDB.IdsByName(name) or {}) do
+
+  -- Try old API (NpcDB) first
+  local ids
+  if _G.NpcDB and NpcDB.IdsByName then
+    ids = NpcDB.IdsByName(name) or {}
+  end
+
+  -- Try new API (QuestieDB) if old API didn't work
+  if not ids or #ids == 0 then
+    if _G.QuestieDB and QuestieDB.GetUnits then
+      local ok, units = pcall(QuestieDB.GetUnits, name)
+      if ok and units then
+        ids = {}
+        for _, unit in ipairs(units) do
+          if unit.id then ids[#ids + 1] = unit.id end
+        end
+      end
+    end
+  end
+
+  for _, id in ipairs(ids or {}) do
     local ok, rank = pcall(NpcDB.Get, id, "rank")
     if ok and rank then
       if rank == 2 or rank == 4 then res.rare = true end

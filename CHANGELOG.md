@@ -1,8 +1,13 @@
-# Beast Training Tracker 1.5.1
-
-### Fixed
-- Taint errors when entering dungeons with many nameplates ("attempted to index a table that cannot be indexed with secret keys"). Event handlers for nameplate alerts now wrapped in pcall to safely handle WoW's security restrictions.
-- Missing RareData.lua file error on source installs. Added stub file to prevent load errors.
+## Unreleased
 
 ### Added
-- Auto-disable on non-hunter characters. When logging in on a non-hunter, the addon will disable itself with a notification message, freeing up resources and preventing errors.
+- **Minimap button alert toggle**: Shift+Right-click the minimap button to quickly toggle all alerts on/off
+  - When alerts are toggled back on, they restore to their previous state (remembers individual alert settings)
+  - Chat feedback confirms whether alerts were enabled or disabled
+
+### Fixed
+- **Questie v12.11.0+ detection**: Updated addon detection to work with the latest Questie versions
+  - Now checks for both old `NpcDB` API and new `QuestieDB` v12+ API
+  - Automatically falls back to new Questie API if old API is not available
+- **Taint error on ability learning**: Fixed crash when parsing tainted chat messages about learned abilities
+  - Wrapped message parsing in pcall to safely handle WoW's secure message restrictions

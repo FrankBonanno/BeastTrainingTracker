@@ -1729,7 +1729,31 @@ if LDB then
     icon = "Interface\\Icons\\Ability_Hunter_BeastTraining",
     OnClick = function(_, button)
       if button == "RightButton" then
-        Geo.TogglePins()
+        if IsShiftKeyDown() then
+          if ns.db.alertsOff then
+            -- Restore previous settings
+            ns.db.opts.alertTarget = ns.db.alertsSaved.alertTarget
+            ns.db.opts.alertNameplate = ns.db.alertsSaved.alertNameplate
+            ns.db.opts.alertSound = ns.db.alertsSaved.alertSound
+            ns.db.alertsOff = false
+            ns.Say("Alerts enabled")
+          else
+            -- Save current settings and turn off
+            ns.db.alertsSaved = {
+              alertTarget = ns.db.opts.alertTarget,
+              alertNameplate = ns.db.opts.alertNameplate,
+              alertSound = ns.db.opts.alertSound,
+            }
+            ns.db.opts.alertTarget = false
+            ns.db.opts.alertNameplate = false
+            ns.db.opts.alertSound = false
+            ns.db.alertsOff = true
+            ns.Say("Alerts disabled")
+          end
+          ns.Refresh()
+        else
+          Geo.TogglePins()
+        end
       elseif button == "MiddleButton" then
         ns.db.opts.tracker = not ns.db.opts.tracker
         ns.Refresh()
@@ -1773,6 +1797,7 @@ if LDB then
       tt:AddLine(" ")
       tt:AddLine("|cffffffffLeft-click|r open / close", 0.6, 0.6, 0.6)
       tt:AddLine(("|cffffffffRight-click|r %s beast pins on the map"):format(ns.db.opts.pinsOff and "show" or "hide"), 0.6, 0.6, 0.6)
+      tt:AddLine("|cffffffffShift+Right-click|r toggle alerts", 0.6, 0.6, 0.6)
       tt:AddLine("|cffffffffMiddle-click|r toggle zone tracker", 0.6, 0.6, 0.6)
     end,
   })

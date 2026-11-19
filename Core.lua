@@ -707,6 +707,7 @@ local DEFAULTS = {
   petXpBar = true, petXpHeight = 7, petXpAutoWidth = true, petXpWidth = 160, petXpTextAlways = false, petXpLock = false,
   petXpShowName = true, petXpShowLevel = true, petXpShowXP = true, petXpShowPct = true,
   upgradeAlert = true, levelNudge = true,
+  alertsOff = false,
 }
 
 local function CharKey()
@@ -726,6 +727,8 @@ local function InitDB()
   db.minimap = db.minimap or {}
   db.rares = db.rares or {}
   db.opts = db.opts or {}
+  db.alertsOff = db.alertsOff or false
+  db.alertsSaved = db.alertsSaved or {}
   for k, v in pairs(DEFAULTS) do
     if db.opts[k] == nil then db.opts[k] = v end
   end
@@ -831,7 +834,7 @@ ev:SetScript("OnEvent", function(_, e, a1)
   elseif e == "TRAINER_SHOW" or e == "TRAINER_UPDATE" then
     ScanTrainerSoon()
   elseif e == "CHAT_MSG_SYSTEM" then
-    ParseLearned(a1 or "")
+    pcall(ParseLearned, a1 or "")
   elseif e == "UNIT_PET" or e == "UNIT_LEVEL" then
     if a1 == "player" or a1 == "pet" then ns.Refresh() end
   else
