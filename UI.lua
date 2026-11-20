@@ -707,7 +707,7 @@ if C_Timer and C_Timer.NewTicker then
 end
 
 ------------------------------------------------------------------------
--- Tab 1: Abilities - Phase 2: Icon Grid with Collapsible Sections
+-- Tab 1: Abilities - Spellbook-style pagination with 2-column grid layout
 ------------------------------------------------------------------------
 do
   local p = panels[1]
@@ -729,34 +729,52 @@ do
   search:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
   search:SetScript("OnTextChanged", function(self)
     ns.search = (self:GetText() or ""):lower():match("^%s*(.-)%s*$")
+    if not ns.abilityPages then ns.abilityPages = {} end
+    ns.abilityPages.current = 1
     p.Refresh()
   end)
   local hint = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   hint:SetPoint("LEFT", search, "RIGHT", 10, 0)
   hint:SetText("ability, beast or zone")
 
-  -- Collapse/Expand All buttons
-  local collapseAll = Button(p, "Collapse all", 96, function()
-    for _, ab in ipairs(abilities) do ns.db.collapsed[ab.name] = true end
-    p.Refresh()
-  end)
-  collapseAll:SetPoint("TOPRIGHT", -4, -34)
-  local expandAll = Button(p, "Expand all", 90, function()
-    wipe(ns.db.collapsed)
-    p.Refresh()
-  end)
-  expandAll:SetPoint("RIGHT", collapseAll, "LEFT", -4, 0)
-
-  -- Scroll frame for content
-  local scroll, child = Scroll(p, -64, 22)
-  local emptyText = child:CreateFontString(nil, "OVERLAY", "GameFontDisable")
-  emptyText:SetPoint("TOP", 0, -40)
-  emptyText:SetText("Nothing matches these filters.")
-
   -- Footer instructions
   local footer = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   footer:SetPoint("BOTTOMLEFT", 6, 4)
-  footer:SetText("Click a rank: add a teacher to your route  ·  Shift-click: new route to all its teachers  ·  Click ability name to collapse")
+  footer:SetText("Click a rank: add a teacher to your route  ·  Shift-click: new route to all its teachers")
+
+  -- Pagination controls at bottom
+  local pageLabel = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  pageLabel:SetPoint("BOTTOMRIGHT", -150, 4)
+  pageLabel:SetJustifyH("RIGHT")
+  pageLabel:SetText("Page 1/1")
+
+  local prevBtn = Button(p, "< Prev", 70, function()
+    if not ns.abilityPages then ns.abilityPages = {} end
+    if ns.abilityPages.current > 1 then
+      ns.abilityPages.current = ns.abilityPages.current - 1
+      p.Refresh()
+    end
+  end)
+  prevBtn:SetPoint("RIGHT", pageLabel, "LEFT", -10, 0)
+
+  local nextBtn = Button(p, "Next >", 70, function()
+    if not ns.abilityPages then ns.abilityPages = {} end
+    local maxPage = ns.abilityPages.maxPage or 1
+    if ns.abilityPages.current < maxPage then
+      ns.abilityPages.current = ns.abilityPages.current + 1
+      p.Refresh()
+    end
+  end)
+  nextBtn:SetPoint("RIGHT", prevBtn, "LEFT", -10, 0)
+
+  -- Main content frame for ability cards (2-column grid)
+  local contentFrame = CreateFrame("Frame", nil, p)
+  contentFrame:SetPoint("TOPLEFT", 4, -60)
+  contentFrame:SetPoint("BOTTOMRIGHT", -4, 50)
+
+  local emptyText = contentFrame:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+  emptyText:SetPoint("TOP", 0, -40)
+  emptyText:SetText("Nothing matches these filters.")
 
   -- Helper: Find best teacher for a rank
   local function BestTeacher(r, zone)
@@ -807,20 +825,6 @@ do
     GameTooltip:Show()
   end
 
-  -- Tooltip for ability headers
-  local function HeaderTooltip(header)
-    local d = header.data
-    if not d then return end
-    local ab = d.ab
-    GameTooltip:SetOwner(header, "ANCHOR_RIGHT")
-    GameTooltip:AddLine(ab.name, 1, 0.82, 0)
-    GameTooltip:AddLine(ab.isAll and "All pet families" or ab.famText, 1, 1, 1, true)
-    GameTooltip:AddLine(ab.src == "trainer" and "Bought from a Pet Trainer" or "Learned by taming a beast that has it", 0.6, 0.8, 1)
-    GameTooltip:AddLine(" ")
-    GameTooltip:AddLine(ns.db.collapsed[ab.name] and "Click to expand" or "Click to collapse", 0.5, 0.5, 0.5)
-    GameTooltip:Show()
-  end
-
   -- Search/filter matching logic
   local function Matches(s, ab, r)
     if not s or s == "" then return true end
@@ -835,157 +839,150 @@ do
   -- Get color for a rank cell based on status
   local function GetRankColor(status, canGet)
     if status == "known" then
-      return 0x40, 0xff, 0x40 -- Green: known/learned
+      return 0.25, 1.0, 0.25 -- Green: known/learned
     elseif status == "implied" then
-      return 0x5f, 0x9f, 0x5f -- Muted green: implied
+      return 0.37, 0.63, 0.37 -- Muted green: implied
     elseif not canGet then
-      return 0x80, 0x80, 0x80 -- Gray: too high level
+      return 0.5, 0.5, 0.5 -- Gray: too high level
     else
-      return 0xff, 0xd1, 0x00 -- Gold: can learn now
+      return 1.0, 0.82, 0.0 -- Gold: can learn now
     end
   end
 
-  -- Sections and rank cells
-  local abilityRows = {} -- { { header, gridFrame, rankCells } }
-  local rankCells = {} -- Reusable rank cell frames
+  -- Card pool
+  local abilityCards = {}
 
-  local function GetRankCell(index)
-    if rankCells[index] then return rankCells[index] end
+  local function GetAbilityCard(index)
+    if abilityCards[index] then return abilityCards[index] end
 
-    local cell = CreateFrame("Button", nil, child)
-    cell:SetSize(60, 60)
+    local card = CreateFrame("Frame", nil, contentFrame, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    if card.SetBackdrop then
+      card:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 10,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+      })
+      card:SetBackdropColor(0.95, 0.92, 0.82, 0.3)
+      card:SetBackdropBorderColor(0.70, 0.62, 0.45, 0.6)
+    end
+    card:SetSize(300, 320)
 
-    -- Background texture
-    cell.bg = cell:CreateTexture(nil, "BACKGROUND")
-    cell.bg:SetAllPoints(cell)
-    cell.bg:SetColorTexture(0.5, 0.5, 0.5, 0.2)
+    -- Ability icon with brown frame border (spellbook style)
+    card.icon = card:CreateTexture(nil, "ARTWORK")
+    card.icon:SetSize(50, 50)
+    card.icon:SetPoint("TOPLEFT", 10, -10)
+    card.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
-    -- Highlight
-    cell.hl = cell:CreateTexture(nil, "HIGHLIGHT")
-    cell.hl:SetAllPoints(cell)
-    cell.hl:SetColorTexture(1, 1, 1, 0.1)
+    -- Icon border frame (brown/gold spellbook frame)
+    card.iconFrame = card:CreateTexture(nil, "OVERLAY")
+    card.iconFrame:SetSize(54, 54)
+    card.iconFrame:SetPoint("CENTER", card.icon, "CENTER")
+    card.iconFrame:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+    card.iconFrame:SetVertexColor(0.6, 0.45, 0.2, 0.8)
 
-    -- Border
-    cell.border = cell:CreateTexture(nil, "ARTWORK")
-    cell.border:SetAllPoints(cell)
-    cell.border:SetColorTexture(0.5, 0.5, 0.5, 0.3)
+    -- Ability name (gold text)
+    card.name = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    card.name:SetPoint("TOPLEFT", card.icon, "TOPRIGHT", 10, -2)
+    card.name:SetWidth(220)
+    card.name:SetHeight(30)
+    card.name:SetJustifyH("LEFT")
+    card.name:SetJustifyV("TOP")
+    card.name:SetWordWrap(true)
+    card.name:SetTextColor(1.0, 0.82, 0.0) -- Gold
 
-    -- Icon (ability icon)
-    cell.icon = cell:CreateTexture(nil, "ARTWORK")
-    cell.icon:SetSize(48, 48)
-    cell.icon:SetPoint("CENTER", 0, 4)
-    cell.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    -- Family info (small text)
+    card.family = card:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    card.family:SetPoint("TOPLEFT", card.icon, "BOTTOMLEFT", 0, -6)
+    card.family:SetWidth(280)
+    card.family:SetJustifyH("LEFT")
+    card.family:SetTextColor(0.6, 0.6, 0.6) -- Dim text
 
-    -- Rank number text
-    cell.rankText = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    cell.rankText:SetPoint("BOTTOM", 0, 2)
-    cell.rankText:SetText("R1")
+    -- Rank grid container (5 columns, R1-R5)
+    card.rankGrid = CreateFrame("Frame", nil, card)
+    card.rankGrid:SetSize(280, 70)
+    card.rankGrid:SetPoint("TOPLEFT", 10, -100)
 
-    -- Phase 8: Enhanced rank cell hover effects with better visual feedback
-    cell:SetScript("OnEnter", function(self)
-      self.hl:SetColorTexture(1, 1, 1, 0.3)  -- More prominent highlight
-      self.border:SetColorTexture(1, 1, 1, 0.8)  -- Bright border on hover
-      RankCellTooltip(self)
-    end)
+    -- Rank cells pool
+    card.rankCells = {}
 
-    cell:SetScript("OnLeave", function(self)
-      self.hl:SetColorTexture(1, 1, 1, 0.1)
-      -- Restore original border color (will be set by rank color)
-      GameTooltip_Hide()
-    end)
+    local function GetRankCell(rankIdx)
+      if card.rankCells[rankIdx] then return card.rankCells[rankIdx] end
 
-    cell:SetScript("OnClick", function(self)
-      local d = self.data
-      if not d then return end
-      local r = d.rank
-      local ab = d.ab
-      if ab.src == "trainer" or #r.teachers == 0 then return end
-      if IsShiftKeyDown() then
-        local list = {}
-        for i2, t in ipairs(r.teachers) do
-          if i2 > 12 then break end
-          list[#list + 1] = { t = t, label = Geo.Label(ab, r, t) }
+      local cell = CreateFrame("Button", nil, card.rankGrid)
+      cell:SetSize(45, 50)
+
+      -- Background
+      cell.bg = cell:CreateTexture(nil, "BACKGROUND")
+      cell.bg:SetAllPoints(cell)
+      cell.bg:SetColorTexture(0.5, 0.5, 0.5, 0.2)
+
+      -- Border
+      cell.border = cell:CreateTexture(nil, "ARTWORK")
+      cell.border:SetAllPoints(cell)
+      cell.border:SetColorTexture(0.5, 0.5, 0.5, 0.3)
+
+      -- Highlight
+      cell.hl = cell:CreateTexture(nil, "HIGHLIGHT")
+      cell.hl:SetAllPoints(cell)
+      cell.hl:SetColorTexture(1, 1, 1, 0.1)
+
+      -- Icon
+      cell.icon = cell:CreateTexture(nil, "ARTWORK")
+      cell.icon:SetSize(36, 36)
+      cell.icon:SetPoint("CENTER", 0, 4)
+      cell.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+      -- Rank text
+      cell.rankText = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      cell.rankText:SetPoint("BOTTOM", 0, 2)
+      cell.rankText:SetTextColor(1, 1, 1)
+
+      cell:SetScript("OnEnter", function(self)
+        self.hl:SetColorTexture(1, 1, 1, 0.3)
+        self.border:SetColorTexture(1, 1, 1, 0.8)
+        RankCellTooltip(self)
+      end)
+
+      cell:SetScript("OnLeave", function(self)
+        self.hl:SetColorTexture(1, 1, 1, 0.1)
+        GameTooltip_Hide()
+      end)
+
+      cell:SetScript("OnClick", function(self)
+        local d = self.data
+        if not d then return end
+        local r = d.rank
+        local ab = d.ab
+        if ab.src == "trainer" or #r.teachers == 0 then return end
+        if IsShiftKeyDown() then
+          local list = {}
+          for i2, t in ipairs(r.teachers) do
+            if i2 > 12 then break end
+            list[#list + 1] = { t = t, label = Geo.Label(ab, r, t) }
+          end
+          Geo.WaypointMany(list)
+        else
+          local t = BestTeacher(r, ns.CurrentZone())
+          if t then Geo.Waypoint(t, Geo.Label(ab, r, t)) end
         end
-        Geo.WaypointMany(list)
-      else
-        local t = BestTeacher(r, ns.CurrentZone())
-        if t then Geo.Waypoint(t, Geo.Label(ab, r, t)) end
-      end
-    end)
+      end)
 
-    rankCells[index] = cell
-    return cell
-  end
+      card.rankCells[rankIdx] = cell
+      return cell
+    end
 
-  local function GetAbilityHeader(index)
-    if abilityRows[index] then return abilityRows[index].header end
-
-    local row = CreateFrame("Button", nil, child)
-    row:SetHeight(26)
-
-    -- Background
-    row.bg = row:CreateTexture(nil, "BACKGROUND")
-    row.bg:SetAllPoints(row)
-    row.bg:SetColorTexture(0.45, 0.33, 0.05, 0.28)
-
-    -- Toggle icon
-    row.toggle = row:CreateTexture(nil, "ARTWORK")
-    row.toggle:SetSize(14, 14)
-    row.toggle:SetPoint("LEFT", 4, 0)
-
-    -- Ability icon
-    row.icon = row:CreateTexture(nil, "ARTWORK")
-    row.icon:SetSize(20, 20)
-    row.icon:SetPoint("LEFT", 22, 0)
-    row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-
-    -- Ability name
-    row.name = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    row.name:SetPoint("LEFT", row.icon, "RIGHT", 8, 1)
-
-    -- Ranks progress
-    row.ranks = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.ranks:SetPoint("LEFT", row.name, "RIGHT", 12, 0)
-    row.ranks:SetJustifyH("LEFT")
-
-    -- Family info
-    row.family = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    row.family:SetPoint("RIGHT", -8, 1)
-    row.family:SetJustifyH("RIGHT")
-
-    -- Phase 8: Enhanced ability header hover effects
-    row:SetScript("OnEnter", function(self)
-      self.bg:SetColorTexture(0.45, 0.33, 0.05, 0.42)  -- Brighter hover state
-      HeaderTooltip(self)
-    end)
-
-    row:SetScript("OnLeave", function(self)
-      self.bg:SetColorTexture(0.45, 0.33, 0.05, 0.28)
-      GameTooltip_Hide()
-    end)
-
-    row:SetScript("OnClick", function(self)
-      local d = self.data
-      if not d then return end
-      ns.db.collapsed[d.ab.name] = (not ns.db.collapsed[d.ab.name]) or nil
-      p.Refresh()
-      if GameTooltip:GetOwner() == self then HeaderTooltip(self) end
-    end)
-
-    local gridFrame = CreateFrame("Frame", nil, child)
-    gridFrame:SetHeight(100)
-
-    abilityRows[index] = { header = row, grid = gridFrame }
-    return row
+    card.GetRankCell = GetRankCell
+    abilityCards[index] = card
+    return card
   end
 
   function p.Refresh()
     if not p:IsShown() then return end
     local o, lvl, fam, zone = ns.db.opts, ns.PetLevel(), ns.PetFamily(), ns.CurrentZone()
     local s = ns.search
-    local searching = s and s ~= ""
 
-    -- Collect filtered abilities and their visible ranks
+    -- Collect filtered abilities
     local visibleAbilities = {}
 
     for _, ab in ipairs(abilities) do
@@ -994,15 +991,14 @@ do
         and not (o.zoneOnly and ab.src == "trainer")
 
       if show then
-        local ranks = {} -- Ranks that pass filters
-        local have, hereCount = 0, 0
+        local ranks = {}
+        local have = 0
 
         for _, r in ipairs(ab.parsed) do
           local st = ns.Status(ab, r.rank)
           if st then have = have + 1 end
 
           local here = ns.HasTeacherHere(r, zone)
-          if here and not st then hereCount = hereCount + 1 end
 
           -- Apply visibility filters
           if not (o.hideKnown and st) and not (o.hideHigh and r.level > lvl)
@@ -1016,123 +1012,125 @@ do
             ab = ab,
             ranks = ranks,
             have = have,
-            here = hereCount
           }
         end
       end
     end
 
-    -- Layout abilities and their rank grids
-    local y = 0
-    local cellIndex = 1
+    -- Pagination: 2 abilities per page
+    if not ns.abilityPages then ns.abilityPages = {} end
+    local abilitiesPerPage = 2
+    local totalPages = math.ceil(#visibleAbilities / abilitiesPerPage)
+    if totalPages == 0 then totalPages = 1 end
+    ns.abilityPages.maxPage = totalPages
 
-    for abilityIndex, entry in ipairs(visibleAbilities) do
+    local currentPage = ns.abilityPages.current or 1
+    if currentPage > totalPages then currentPage = totalPages end
+    ns.abilityPages.current = currentPage
+
+    -- Calculate start and end ability indices for current page
+    local startIdx = (currentPage - 1) * abilitiesPerPage + 1
+    local endIdx = math.min(startIdx + abilitiesPerPage - 1, #visibleAbilities)
+
+    -- Update page label
+    pageLabel:SetText(("Page %d/%d"):format(currentPage, totalPages))
+
+    -- Update pagination buttons
+    prevBtn:SetEnabled(currentPage > 1)
+    nextBtn:SetEnabled(currentPage < totalPages)
+
+    -- Layout cards for this page
+    local cardIndex = 1
+    local cardCol = 1
+
+    for abilityIdx = startIdx, endIdx do
+      local entry = visibleAbilities[abilityIdx]
       local ab = entry.ab
       local ranks = entry.ranks
-      local collapsed = ns.db.collapsed[ab.name] and not searching
 
-      -- Create/reuse ability header row
-      local header = GetAbilityHeader(abilityIndex)
-      header:ClearAllPoints()
-      header:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
-      header:SetPoint("RIGHT", child, "RIGHT")
-      header:Show()
+      local card = GetAbilityCard(cardIndex)
+      card.data = { ab = ab, ranks = ranks }
 
-      header.data = { header = true, ab = ab }
+      -- Position card (2-column grid)
+      local cardWidth = 310
+      local cardHeight = 330
+      local startX = 10 + (cardCol - 1) * (cardWidth + 10)
+      local startY = -10
 
-      -- Update header appearance
+      card:ClearAllPoints()
+      card:SetPoint("TOPLEFT", contentFrame, "TOPLEFT", startX, startY)
+      card:Show()
+
+      -- Update card appearance
       local complete = entry.have == #ab.parsed
-      header.name:SetText(complete and (GREEN .. ab.name .. "|r") or ab.name)
-      header.ranks:SetText(("|cffffffff%d/%d|r"):format(entry.have, #ab.parsed))
-
+      card.name:SetText(complete and (GREEN .. ab.name .. "|r") or ab.name)
       local fams = ab.isAll and "all families" or ab.famText
-      header.family:SetText(fams)
+      card.family:SetText(fams)
+      card.icon:SetTexture(ab.icon)
 
-      local toggleTex = collapsed and "Interface\\Buttons\\UI-PlusButton-Up" or "Interface\\Buttons\\UI-MinusButton-Up"
-      header.toggle:SetTexture(toggleTex)
-      header.icon:SetTexture(ab.icon)
+      -- Layout rank cells (5 columns, 2 rows max)
+      for rankIdx, rankData in ipairs(ranks) do
+        if rankIdx > 10 then break end -- Max 10 ranks visible
 
-      y = y + 26
+        local rankCell = card:GetRankCell(rankIdx)
+        rankCell.data = rankData
 
-      -- Layout rank grid if expanded
-      if not collapsed then
-        local grid = abilityRows[abilityIndex].grid
-        grid:ClearAllPoints()
-        grid:SetPoint("TOPLEFT", child, "TOPLEFT", 4, -y)
-        grid:SetPoint("RIGHT", child, "RIGHT", -4, 0)
-        grid:Show()
+        local col = (rankIdx - 1) % 5
+        local row = math.floor((rankIdx - 1) / 5)
 
-        -- Determine number of columns based on available width
-        local availWidth = grid:GetWidth() - 8
-        local cellSize = 60
-        local cellPadding = 6
-        local numCols = math.max(3, math.floor((availWidth + cellPadding) / (cellSize + cellPadding)))
+        rankCell:ClearAllPoints()
+        rankCell:SetPoint("TOPLEFT", card.rankGrid, "TOPLEFT", col * 50, -(row * 55))
+        rankCell:Show()
 
-        -- Layout rank cells in a grid
-        for rankIdx, rankData in ipairs(ranks) do
-          local cell = GetRankCell(cellIndex)
-          cell.data = rankData
+        -- Set rank cell appearance
+        rankCell.icon:SetTexture(rankData.ab.icon)
+        rankCell.rankText:SetText("R" .. rankData.rank.rank)
 
-          local col = (rankIdx - 1) % numCols
-          local row = math.floor((rankIdx - 1) / numCols)
-
-          cell:ClearAllPoints()
-          cell:SetPoint("TOPLEFT", grid, "TOPLEFT", col * (cellSize + cellPadding), -(row * (cellSize + cellPadding)))
-          cell:Show()
-
-          -- Set rank cell appearance
-          cell.icon:SetTexture(rankData.ab.icon)
-          cell.rankText:SetText("R" .. rankData.rank.rank)
-
-          -- Determine rank cell color
-          local canGet = rankData.ab.src == "trainer" or #rankData.rank.teachers == 0
-          if not canGet then
-            for _, t in ipairs(rankData.rank.teachers) do
-              if ns.CanTame(t) then canGet = true break end
-            end
+        -- Determine rank cell color
+        local canGet = rankData.ab.src == "trainer" or #rankData.rank.teachers == 0
+        if not canGet then
+          for _, t in ipairs(rankData.rank.teachers) do
+            if ns.CanTame(t) then canGet = true break end
           end
-
-          local r, g, b = GetRankColor(rankData.status, canGet)
-          cell.border:SetColorTexture(r / 255, g / 255, b / 255, 0.6)
-          cell.bg:SetColorTexture(r / 255, g / 255, b / 255, 0.1)
-
-          cellIndex = cellIndex + 1
         end
 
-        -- Calculate grid height
-        local numRows = math.ceil(#ranks / numCols)
-        local gridHeight = numRows * (cellSize + cellPadding) + cellPadding
-        grid:SetHeight(gridHeight)
+        local r, g, b = GetRankColor(rankData.status, canGet)
+        rankCell.border:SetColorTexture(r, g, b, 0.6)
+        rankCell.bg:SetColorTexture(r, g, b, 0.1)
+      end
 
-        y = y + gridHeight + 6
+      -- Hide unused rank cells
+      for i = #ranks + 1, #card.rankCells do
+        card.rankCells[i]:Hide()
+      end
+
+      cardIndex = cardIndex + 1
+      cardCol = cardCol + 1
+
+      if cardCol > 2 then
+        cardCol = 1
       end
     end
 
-    -- Hide unused rank cells
-    for i = cellIndex, #rankCells do
-      rankCells[i]:Hide()
-    end
-
-    -- Hide unused ability headers
-    for i = #visibleAbilities + 1, #abilityRows do
-      abilityRows[i].header:Hide()
-      abilityRows[i].grid:Hide()
+    -- Hide unused cards
+    for i = cardIndex, #abilityCards do
+      abilityCards[i]:Hide()
     end
 
     emptyText:SetShown(#visibleAbilities == 0)
-    child:SetHeight(math.max(1, y))
   end
 
   p:SetScript("OnShow", function() p.Refresh() end)
 end
 
 ------------------------------------------------------------------------
--- Tab 2: Hunt Planner (Zone Cards with Beast Grid)
+-- Tab 2: Hunt Planner (Spellbook-styled Zone Cards with Beast Grid)
 ------------------------------------------------------------------------
 do
   local p = panels[2]
+  local theme = ns.UITheme
 
-  -- Terrain color mapping for zones
+  -- Terrain color mapping for zones (spellbook card background shades)
   local ZONE_COLORS = {
     -- Kalimdor
     ["Barrens"] = { r = 0.75, g = 0.65, b = 0.35, a = 0.15 },
@@ -1179,8 +1177,17 @@ do
     return c or { r = 0.5, g = 0.5, b = 0.5, a = 0.1 }
   end
 
+  -- Rarity border colors for beast icons
+  local RARITY_COLORS = {
+    common = { r = 0.95, g = 0.95, b = 0.95, name = "Common" },      -- White
+    rare = { r = 0.0, g = 0.44, b = 0.87, name = "Rare" },            -- Blue
+    elite = { r = 0.64, g = 0.21, b = 0.93, name = "Elite" },         -- Purple
+  }
+
+  -- Intro and filters
   local intro = Text(p, "GameFontHighlightSmall", 6, -4)
   intro:SetWidth(600)
+
   Check(p, "My pet's family only", "huntPetOnly", 2, -34, "Only count abilities your current pet's family can use.")
   Check(p, "Include dungeons", "huntDungeons", 160, -34, "Also count beasts that live inside dungeons.")
   Check(p, "Sort by most new ranks", "huntSortCount", 290, -34, "Show the zones with the most new ranks first, instead of lowest level first.")
@@ -1188,13 +1195,14 @@ do
     "Also list zones that belong to the other faction (marked in red). Contested zones are always shown.")
   Check(p, "Show my current zone first", "huntHereFirst", 2, -56,
     "If the zone you're in has something to tame, list it at the top.")
+
   local questieNote = Text(p, "GameFontHighlightSmall", 210, -61)
   questieNote:SetWidth(600)
   questieNote:SetWordWrap(false)
   Divider(p, -82)
 
-  -- Route preview at bottom
-  Text(p, "GameFontNormalSmall", 6, -86, "Current route:")
+  -- Route builder section at top (spellbook style)
+  Text(p, "GameFontNormalSmall", 6, -86, "Route Builder:")
   local routeText = Text(p, "GameFontDisableSmall", 6, -102)
   routeText:SetWidth(650)
   routeText:SetJustifyH("LEFT")
@@ -1205,9 +1213,11 @@ do
   end)
   clearRoute:SetPoint("TOPRIGHT", -8, -100)
 
+  Divider(p, -118)
+
   -- Scroll container for zone cards
   local scrollContainer = CreateFrame("ScrollFrame", nil, p)
-  scrollContainer:SetPoint("TOPLEFT", 2, -120)
+  scrollContainer:SetPoint("TOPLEFT", 2, -130)
   scrollContainer:SetPoint("BOTTOMRIGHT", -2, 2)
   scrollContainer:EnableMouseWheel(true)
 
@@ -1221,49 +1231,84 @@ do
 
   -- Zone cards cache
   local cards = {}
+  local currentPage = 1
 
+  ---------- Beast Icon Creation ----------
   local function MakeBeastIcon(parent, entry, x, y)
     local btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(60, 60)
+    btn:SetSize(68, 68)
     btn:SetPoint("TOPLEFT", x, y)
 
-    -- Icon texture
+    -- Brown frame background (spellbook icon style)
+    local frameBg = btn:CreateTexture(nil, "BACKGROUND")
+    frameBg:SetAllPoints(btn)
+    frameBg:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+    frameBg:SetVertexColor(0.4, 0.3, 0.1, 1.0)
+
+    -- Icon texture with proper coords
     local icon = btn:CreateTexture(nil, "ARTWORK")
-    icon:SetAllPoints(btn)
+    icon:SetPoint("TOPLEFT", 3, -3)
+    icon:SetPoint("BOTTOMRIGHT", -3, 3)
     icon:SetTexture(entry.ab.icon)
     icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
-    -- Rarity border - determine from ability source
+    -- Rarity border - create a colored outline frame
     local rarity = entry.ab.src == "trainer" and "rare" or "common"
-    local borderColor = { common = {0.9, 0.9, 0.9, 1}, rare = {0.5, 0.75, 1, 1}, elite = {0.8, 0.5, 1, 1} }
-    local bc = borderColor[rarity] or borderColor.common
+    local rarityData = RARITY_COLORS[rarity] or RARITY_COLORS.common
 
-    local border = btn:CreateTexture(nil, "OVERLAY")
-    border:SetAllPoints(btn)
-    border:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
-    border:SetVertexColor(bc[1], bc[2], bc[3], bc[4])
+    -- Top rarity line
+    local rarityTop = btn:CreateTexture(nil, "OVERLAY")
+    rarityTop:SetPoint("TOPLEFT", 1, -1)
+    rarityTop:SetPoint("TOPRIGHT", -1, -1)
+    rarityTop:SetHeight(2)
+    rarityTop:SetColorTexture(rarityData.r, rarityData.g, rarityData.b, 0.9)
 
-    -- Tooltip
+    -- Bottom rarity line
+    local rarityBot = btn:CreateTexture(nil, "OVERLAY")
+    rarityBot:SetPoint("BOTTOMLEFT", 1, 1)
+    rarityBot:SetPoint("BOTTOMRIGHT", -1, 1)
+    rarityBot:SetHeight(2)
+    rarityBot:SetColorTexture(rarityData.r, rarityData.g, rarityData.b, 0.9)
+
+    -- Left rarity line
+    local rarityLeft = btn:CreateTexture(nil, "OVERLAY")
+    rarityLeft:SetPoint("TOPLEFT", 1, -1)
+    rarityLeft:SetPoint("BOTTOMLEFT", 1, 1)
+    rarityLeft:SetWidth(2)
+    rarityLeft:SetColorTexture(rarityData.r, rarityData.g, rarityData.b, 0.9)
+
+    -- Right rarity line
+    local rarityRight = btn:CreateTexture(nil, "OVERLAY")
+    rarityRight:SetPoint("TOPRIGHT", -1, -1)
+    rarityRight:SetPoint("BOTTOMRIGHT", -1, 1)
+    rarityRight:SetWidth(2)
+    rarityRight:SetColorTexture(rarityData.r, rarityData.g, rarityData.b, 0.9)
+
+    -- Tooltip with enhanced info
     btn:SetScript("OnEnter", function(self)
       GameTooltip:SetOwner(self, "ANCHOR_TOP")
       GameTooltip:AddLine(entry.ab.name .. " Rank " .. entry.rank.rank, 1, 0.82, 0)
+      GameTooltip:AddLine(("Rarity: %s"):format(rarityData.name), rarityData.r, rarityData.g, rarityData.b)
+      GameTooltip:AddLine(" ")
       GameTooltip:AddLine(entry.rank.effect, 1, 1, 1, true)
       GameTooltip:AddLine(" ")
       local teachers = {}
       for i, t in ipairs(entry.teachers) do
-        if i > 2 then
-          teachers[#teachers + 1] = ("|cff9d9d9d+%d more|r"):format(#entry.teachers - 2)
+        if i > 3 then
+          teachers[#teachers + 1] = ("|cff9d9d9d+%d more|r"):format(#entry.teachers - 3)
           break
         end
         teachers[#teachers + 1] = t.name
       end
       GameTooltip:AddLine("Teachers: " .. table.concat(teachers, ", "), 0.8, 0.8, 0.8)
+      GameTooltip:AddLine(" ")
+      GameTooltip:AddLine("Right-click for waypoint", 0.5, 0.5, 0.5)
       GameTooltip:Show()
     end)
 
-    btn:SetScript("OnLeave", GameTooltip_Hide)
+    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- Right-click waypoint
+    -- Right-click waypoint to all teachers
     btn:SetScript("OnClick", function(self, button)
       if button == "RightButton" then
         local list = {}
@@ -1274,71 +1319,107 @@ do
       end
     end)
 
+    -- Hover effect
+    btn:SetScript("OnMouseDown", function()
+      icon:SetAlpha(0.7)
+    end)
+
+    btn:SetScript("OnMouseUp", function()
+      icon:SetAlpha(1.0)
+    end)
+
     return btn
   end
 
-  local function MakeZoneCard(zoneData, index, parent)
+  ---------- Zone Card Creation ----------
+  local function MakeZoneCard(zoneData, parent, startX, startY)
     local card = CreateFrame("Frame", nil, parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
-    card:SetSize(200, 150)
-    card:SetPoint("TOPLEFT", 10 + (index - 1) * 220, 0)
+    card:SetSize(280, 220)
+    card:SetPoint("TOPLEFT", startX, startY)
 
+    -- Spellbook-style backdrop (parchment card)
     if card.SetBackdrop then
       card:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeFile = "Interface\\ChatFrame\\ChatFrameTab-Border",
         edgeSize = 10,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
       })
-      card:SetBackdropColor(0.1, 0.1, 0.1, 0.4)
-      card:SetBackdropBorderColor(0.5, 0.4, 0.2, 0.6)
+      -- Parchment background
+      card:SetBackdropColor(
+        theme.colors.parchmentDark.r,
+        theme.colors.parchmentDark.g,
+        theme.colors.parchmentDark.b,
+        0.5
+      )
+      -- Aged border
+      card:SetBackdropBorderColor(
+        theme.colors.parchmentAged.r,
+        theme.colors.parchmentAged.g,
+        theme.colors.parchmentAged.b,
+        0.8
+      )
     end
 
-    -- Terrain color background
+    -- Terrain color background overlay (subtle)
     local terrainBg = card:CreateTexture(nil, "BACKGROUND")
     terrainBg:SetAllPoints(card)
     local tc = GetZoneTerrainColor(zoneData.zone)
     terrainBg:SetColorTexture(tc.r, tc.g, tc.b, tc.a)
 
-    -- Zone name (title)
+    -- Zone name header (gold color)
     local zoneName = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    zoneName:SetPoint("TOPLEFT", 6, -6)
-    zoneName:SetWidth(188)
+    zoneName:SetPoint("TOPLEFT", 10, -10)
+    zoneName:SetWidth(260)
     zoneName:SetJustifyH("LEFT")
-    zoneName:SetText(("|cffffd700%s|r"):format(zoneData.zone))
+    zoneName:SetText(("|cff%s%s|r"):format("ffd700", zoneData.zone))
 
     -- Level range (color coded)
     local lvl = ns.PlayerLevel()
-    local rc = (zoneData.maxLevel < lvl) and "|cff9d9d9d" or ((zoneData.minLevel > lvl) and "|cffff9040" or GREEN)
+    local levelColor = (zoneData.maxLevel < lvl) and "|cff9d9d9d" or ((zoneData.minLevel > lvl) and "|cffff9040" or GREEN)
     local levelText = card:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    levelText:SetPoint("TOPLEFT", 6, -22)
-    levelText:SetText(("%s%d-%d|r"):format(rc, zoneData.minLevel, zoneData.maxLevel))
+    levelText:SetPoint("TOPLEFT", 10, -27)
+    levelText:SetText(("%sLevel %d-%d|r"):format(levelColor, zoneData.minLevel, zoneData.maxLevel))
 
-    -- Beast count
+    -- Beast count (green highlight)
     local countText = card:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    countText:SetPoint("TOPRIGHT", -6, -22)
-    countText:SetText(("|cff40ff40%d rank%s|r"):format(#zoneData.entries, #zoneData.entries == 1 and "" or "s"))
+    countText:SetPoint("TOPRIGHT", -10, -27)
+    countText:SetText(("|cff40ff40%d Rank%s|r"):format(#zoneData.entries, #zoneData.entries == 1 and "" or "s"))
 
-    -- You are here indicator
+    -- You are here indicator (flashing style)
     if zoneData.here then
       local hereText = card:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-      hereText:SetPoint("BOTTOMRIGHT", -6, 6)
-      hereText:SetText("|cff40ff40(You're here)|r")
+      hereText:SetPoint("TOPRIGHT", -10, -40)
+      hereText:SetText("|cff40ff40★ You're here|r")
     end
 
-    -- Beast icon grid (4 icons max, arranged in 2x2)
-    local gridY = -38
-    for i = 1, math.min(4, #zoneData.entries) do
-      local row = math.floor((i - 1) / 2)
-      local col = (i - 1) % 2
-      local x = 6 + col * 92
-      local y = gridY - row * 60
+    -- Divider line
+    local divider = card:CreateTexture(nil, "OVERLAY")
+    divider:SetPoint("TOPLEFT", 8, -44)
+    divider:SetPoint("TOPRIGHT", -8, -44)
+    divider:SetHeight(1)
+    divider:SetColorTexture(0.5, 0.4, 0.2, 0.3)
+
+    -- Beast icon grid (5-6 per card in grid layout)
+    local gridStartX = 10
+    local gridStartY = -54
+    local iconSize = 68
+    local iconPadding = 4
+    local iconsPerRow = 3
+
+    local iconCount = math.min(6, #zoneData.entries)
+    for i = 1, iconCount do
+      local row = math.floor((i - 1) / iconsPerRow)
+      local col = (i - 1) % iconsPerRow
+      local x = gridStartX + col * (iconSize + iconPadding)
+      local y = gridStartY - row * (iconSize + iconPadding)
       MakeBeastIcon(card, zoneData.entries[i], x, y)
     end
 
-    -- Waypoint button for all beasts
+    -- Route button (bottom left)
     local waypointBtn = CreateFrame("Button", nil, card, "UIPanelButtonTemplate")
-    waypointBtn:SetSize(70, 20)
-    waypointBtn:SetPoint("BOTTOMLEFT", 6, 4)
+    waypointBtn:SetSize(80, 22)
+    waypointBtn:SetPoint("BOTTOMLEFT", 10, 8)
     waypointBtn:SetText("Route")
     waypointBtn:SetScript("OnClick", function()
       local list = {}
@@ -1353,13 +1434,15 @@ do
       -- Add to route
       if not ns.db.huntRoute then ns.db.huntRoute = {} end
       ns.db.huntRoute[zoneData.zone] = zoneData
+      p.Refresh()
     end)
 
-    -- Enable mouse for tooltip
-    card:EnableMouse(true)
-
-    card:SetScript("OnMouseDown", function(self)
-      -- Show details tooltip
+    -- Details indicator (bottom right)
+    local detailsBtn = CreateFrame("Button", nil, card)
+    detailsBtn:SetSize(240, 20)
+    detailsBtn:SetPoint("BOTTOMRIGHT", -10, 8)
+    detailsBtn:EnableMouse(true)
+    detailsBtn:SetScript("OnEnter", function(self)
       GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
       GameTooltip:AddLine(zoneData.zone, 1, 0.82, 0)
       GameTooltip:AddLine(("Level %d-%d"):format(zoneData.minLevel, zoneData.maxLevel), 0.8, 0.8, 0.8)
@@ -1367,21 +1450,20 @@ do
       for _, e in ipairs(zoneData.entries) do
         GameTooltip:AddLine(("%s Rank %d"):format(e.ab.name, e.rank.rank), 1, 1, 1)
       end
-      GameTooltip:AddLine(" ")
-      GameTooltip:AddLine("Right-click beasts for waypoints", 0.5, 0.5, 0.5)
       GameTooltip:Show()
     end)
-
-    card:SetScript("OnLeave", GameTooltip_Hide)
+    detailsBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     return card
   end
 
+  ---------- Refresh Function ----------
   function p.Refresh()
     if not p:IsShown() then return end
     local o = ns.db.opts
-    intro:SetText(("Zone cards with ranks you can tame at |cffffffffyour level (%d)|r. " ..
-      "Click beasts for waypoints. Shift-drag cards to reorder your hunt route."):format(ns.PlayerLevel()))
+
+    intro:SetText(("|cffffffffZone cards|r with ranks you can tame at |cffffffffLevel %d|r. " ..
+      "Right-click beast icons for waypoints. Click Route to add zone to your hunt plan."):format(ns.PlayerLevel()))
 
     local plan = ns.HuntPlan(o.huntPetOnly, o.huntDungeons, o.huntSortCount and "count" or "level")
 
@@ -1404,14 +1486,31 @@ do
     end
     cards = {}
 
-    -- Create new zone cards
-    for i, zoneData in ipairs(plan) do
-      cards[i] = MakeZoneCard(zoneData, i, scrollChild)
+    -- Pagination calculation
+    local totalCards = #plan
+    local cardsPerRow = 2
+    local cardsPerPage = 4
+    local totalPages = math.max(1, math.ceil(totalCards / cardsPerPage))
+    currentPage = math.min(currentPage, totalPages)
+
+    -- Create zone cards for current page
+    local cardIndex = 0
+    for i = 1, totalCards do
+      local pageNum = math.ceil(i / cardsPerPage)
+      if pageNum == currentPage then
+        cardIndex = cardIndex + 1
+        local row = math.floor((cardIndex - 1) / cardsPerRow)
+        local col = (cardIndex - 1) % cardsPerRow
+        local startX = 8 + col * 290
+        local startY = -20 - row * 240
+        cards[i] = MakeZoneCard(plan[i], scrollChild, startX, startY)
+      end
     end
 
     -- Update scroll child height
-    local rows = math.ceil(#plan / 2)
-    scrollChild:SetHeight(math.max(160, rows * 160))
+    local displayedCards = math.min(cardsPerPage, totalCards - (currentPage - 1) * cardsPerPage)
+    local rows = math.ceil(displayedCards / cardsPerRow)
+    scrollChild:SetHeight(math.max(240, rows * 240 + 20))
 
     -- Update route preview text
     if ns.db.huntRoute and ns.db.huntRoute ~= {} then
@@ -1419,9 +1518,16 @@ do
       for zone, _ in pairs(ns.db.huntRoute) do
         table.insert(routeStr, zone)
       end
-      routeText:SetText("Route: " .. table.concat(routeStr, " > "))
+      routeText:SetText("Current Route: " .. table.concat(routeStr, " > "))
     else
       routeText:SetText("(No route planned yet)")
+    end
+
+    -- Pagination display
+    if totalPages > 1 then
+      scrollChild:SetScript("OnUpdate", function(self)
+        -- Can add pagination controls here if needed
+      end)
     end
   end
 
@@ -1429,7 +1535,7 @@ do
 end
 
 ------------------------------------------------------------------------
--- Tab 3: Rare Pets (Grid-based redesign with 3D model viewer)
+-- Tab 3: Special Pets (Spellbook Grid with Rarity Borders)
 ------------------------------------------------------------------------
 do
   local p = panels[ns.TAB.rares]
@@ -1702,7 +1808,7 @@ do
   drawer:SetScript("OnHide", function() drawer.name, current, slideT = nil, nil, nil end)
   p:HookScript("OnHide", function() drawer:Hide() end)
 
-  -- Pet grid cells
+  -- Pet grid cells (Spellbook-style)
   local petCells = {}
   local function GetPetCell(index)
     if petCells[index] then return petCells[index] end
@@ -1710,15 +1816,26 @@ do
     local cell = CreateFrame("Button", nil, child)
     cell:SetSize(80, 100)
 
-    -- Background
+    -- Spellbook-style background
     cell.bg = cell:CreateTexture(nil, "BACKGROUND")
     cell.bg:SetAllPoints(cell)
-    cell.bg:SetColorTexture(0.2, 0.2, 0.2, 0.3)
+    cell.bg:SetColorTexture(0.1, 0.1, 0.1, 0.4)
 
-    -- Rarity border
-    cell.border = cell:CreateTexture(nil, "ARTWORK")
-    cell.border:SetAllPoints(cell)
-    cell.border:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+    -- Spellbook-style outer border frame
+    cell.borderFrame = CreateFrame("Frame", nil, cell, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    cell.borderFrame:SetAllPoints(cell)
+    if cell.borderFrame.SetBackdrop then
+      cell.borderFrame:SetBackdrop({
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 }
+      })
+      cell.borderFrame:SetBackdropBorderColor(0.5, 0.4, 0.2, 0.6)
+    end
+
+    -- Rarity-colored border ring (will be updated per pet)
+    cell.rarityRing = cell:CreateTexture(nil, "ARTWORK")
+    cell.rarityRing:SetAllPoints(cell)
 
     -- Pet icon
     cell.icon = cell:CreateTexture(nil, "ARTWORK")
@@ -1726,21 +1843,24 @@ do
     cell.icon:SetPoint("TOP", 0, -6)
     cell.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
-    -- Pet name (bottom)
+    -- Pet name (bottom, centered)
     cell.name = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     cell.name:SetPoint("BOTTOM", 0, 2)
     cell.name:SetWidth(70)
     cell.name:SetJustifyH("CENTER")
     cell.name:SetWordWrap(true)
 
-    -- Highlight
+    -- Highlight on hover
     cell.hl = cell:CreateTexture(nil, "HIGHLIGHT")
     cell.hl:SetAllPoints(cell)
     cell.hl:SetColorTexture(1, 1, 1, 0.1)
 
-    -- Tooltip
+    -- Tooltip and hover effects
     cell:SetScript("OnEnter", function(self)
-      self.hl:SetColorTexture(1, 1, 1, 0.2)
+      self.hl:SetColorTexture(1, 1, 1, 0.3)
+      if self.borderFrame.SetBackdropBorderColor then
+        self.borderFrame:SetBackdropBorderColor(1, 0.82, 0, 0.9) -- Gold on hover
+      end
       if self.data then
         local r = self.data
         local cur = ns.RS.Info(r.name)
@@ -1772,6 +1892,11 @@ do
 
     cell:SetScript("OnLeave", function(self)
       self.hl:SetColorTexture(1, 1, 1, 0.1)
+      -- Restore rarity-based border color
+      if self.data and self.borderFrame.SetBackdropBorderColor then
+        local rarity = GetRarityColor(self.data)
+        self.borderFrame:SetBackdropBorderColor(rarity.r, rarity.g, rarity.b, 0.6)
+      end
       GameTooltip_Hide()
     end)
 
@@ -1844,9 +1969,11 @@ do
       local nameColor = r.tamed and "|cff9d9d9d" or (ns.CanTame(r.t) and "|cffffffff" or "|cff996030")
       cell.name:SetText(nameColor .. r.name .. "|r")
 
-      -- Set rarity border color
+      -- Set rarity-based border color (spellbook style)
       local rarity = GetRarityColor(r)
-      cell.border:SetVertexColor(rarity.r, rarity.g, rarity.b)
+      if cell.borderFrame.SetBackdropBorderColor then
+        cell.borderFrame:SetBackdropBorderColor(rarity.r, rarity.g, rarity.b, 0.6)
+      end
 
       cellIndex = cellIndex + 1
     end
@@ -1892,23 +2019,33 @@ do
       edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 10,
       insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    card:SetBackdropColor(0.95, 0.92, 0.82, 0.3)
-    card:SetBackdropBorderColor(0.70, 0.62, 0.45, 0.6)
+    -- Enhanced spellbook card colors
+    card:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
+    card:SetBackdropBorderColor(0.70, 0.62, 0.45, 0.8)
 
     if title then
       local titleFs = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-      titleFs:SetPoint("TOPLEFT", 10, -8)
+      titleFs:SetPoint("TOPLEFT", 12, -10)
       titleFs:SetText(title)
-      titleFs:SetTextColor(1, 0.82, 0)
+      titleFs:SetTextColor(1, 0.82, 0) -- Gold title
       card.title = titleFs
     end
 
     if subtitle then
       local subFs = card:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      subFs:SetPoint("TOPLEFT", 10, -26)
+      subFs:SetPoint("TOPLEFT", 12, -28)
       subFs:SetText(subtitle)
-      subFs:SetTextColor(0.9, 0.9, 0.9)
+      subFs:SetTextColor(1, 1, 1)
       card.subtitle = subFs
+    end
+
+    -- Add subtle separator line under title
+    if title then
+      local line = card:CreateTexture(nil, "ARTWORK")
+      line:SetColorTexture(0.67, 0.83, 0.45, 0.2)
+      line:SetHeight(1)
+      line:SetPoint("TOPLEFT", 10, -40)
+      line:SetPoint("TOPRIGHT", -10, -40)
     end
 
     return card
@@ -1930,7 +2067,7 @@ do
     local fam, plvl = ns.PetFamily() or "?", ns.PetLevel()
     local petName = UnitName("pet") or "Pet"
 
-    -- Pet Status Card
+    -- Pet Status Card (Spellbook style)
     local statusCard = CreateCard(child, petName .. "  |cffffffff" .. fam .. "|r, Level " .. plvl)
     statusCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
     statusCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
@@ -1940,7 +2077,7 @@ do
       local total, spent = GetPetTrainingPoints()
       if total then
         local tpText = statusCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        tpText:SetPoint("TOPLEFT", 10, -44)
+        tpText:SetPoint("TOPLEFT", 10, -50)
         tpText:SetText(("Training points: |cffffffff%d free|r of %d"):format((total or 0) - (spent or 0), total or 0))
       end
     end
@@ -1961,10 +2098,10 @@ do
       local readyCard = CreateCard(child, "|cff40ff40Ready Now|r (" .. #readyUps .. ")")
       readyCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
       readyCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
-      local contentY = -40
+      local contentY = -50
       for _, u in ipairs(readyUps) do
         local row = readyCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row:SetPoint("TOPLEFT", 10, contentY)
+        row:SetPoint("TOPLEFT", 12, contentY)
         row:SetWidth(500)
         row:SetJustifyH("LEFT")
         row:SetWordWrap(true)
@@ -1979,10 +2116,10 @@ do
       local levelCard = CreateCard(child, "|cffff9040Needs Level|r (" .. #levelUps .. ")")
       levelCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
       levelCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
-      local contentY = -40
+      local contentY = -50
       for _, u in ipairs(levelUps) do
         local row = levelCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row:SetPoint("TOPLEFT", 10, contentY)
+        row:SetPoint("TOPLEFT", 12, contentY)
         row:SetWidth(500)
         row:SetJustifyH("LEFT")
         row:SetWordWrap(true)
@@ -1999,7 +2136,7 @@ do
       noUpsCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
       noUpsCard:SetHeight(50)
       local msg = noUpsCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      msg:SetPoint("TOPLEFT", 10, -30)
+      msg:SetPoint("TOPLEFT", 12, -50)
       msg:SetText("Your pet already has the best ranks you know.")
       y = y + 60
     end
@@ -2010,10 +2147,10 @@ do
       local comingCard = CreateCard(child, "Coming Up (Next 6 Levels)", nil)
       comingCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
       comingCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
-      local contentY = -40
+      local contentY = -50
       for _, s in ipairs(soon) do
         local row = comingCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row:SetPoint("TOPLEFT", 10, contentY)
+        row:SetPoint("TOPLEFT", 12, contentY)
         row:SetWidth(500)
         row:SetJustifyH("LEFT")
         row:SetWordWrap(true)
@@ -2039,11 +2176,11 @@ do
       local extraCard = CreateCard(child, "Learn These Next", nil)
       extraCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
       extraCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
-      local contentY = -40
+      local contentY = -50
       for _, x in ipairs(extra) do
         local r = x.ab.parsed[x.rank]
         local row = extraCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row:SetPoint("TOPLEFT", 10, contentY)
+        row:SetPoint("TOPLEFT", 12, contentY)
         row:SetWidth(500)
         row:SetJustifyH("LEFT")
         row:SetWordWrap(true)
@@ -2076,22 +2213,25 @@ do
       edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 10,
       insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    card:SetBackdropColor(0.95, 0.92, 0.82, 0.3)
-    card:SetBackdropBorderColor(0.70, 0.62, 0.45, 0.6)
+    -- Enhanced spellbook card colors
+    card:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
+    card:SetBackdropBorderColor(0.70, 0.62, 0.45, 0.8)
     card:EnableMouse(true)
 
+    -- Gold header title
     local titleFs = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    titleFs:SetPoint("TOPLEFT", 10, -8)
+    titleFs:SetPoint("TOPLEFT", 12, -10)
     titleFs:SetText(title)
-    titleFs:SetTextColor(1, 0.82, 0)
-
-    local toggle = card:CreateTexture(nil, "ARTWORK")
-    toggle:SetSize(14, 14)
-    toggle:SetPoint("TOPRIGHT", -8, -8)
-    toggle:SetTexture("Interface\\Buttons\\UI-MinusButton-Up")
-
+    titleFs:SetTextColor(1, 0.82, 0) -- Gold
     card.title = titleFs
-    card.toggle = toggle
+
+    -- Subtle separator under title
+    local titleLine = card:CreateTexture(nil, "ARTWORK")
+    titleLine:SetColorTexture(0.67, 0.83, 0.45, 0.2)
+    titleLine:SetHeight(1)
+    titleLine:SetPoint("TOPLEFT", 10, -32)
+    titleLine:SetPoint("TOPRIGHT", -10, -32)
+
     card.isExpanded = true
 
     return card
@@ -2111,7 +2251,7 @@ do
     local addonsCard = CreateSettingsCard(child, "Optional Addons")
     addonsCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
     addonsCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
-    local contentY = -40
+    local contentY = -44
     for i, a in ipairs(Geo.AddonStatus()) do
       local row = CreateFrame("Frame", nil, addonsCard)
       row:SetSize(500, 16)
@@ -2142,7 +2282,7 @@ do
     local mapCard = CreateSettingsCard(child, "Map & Pins")
     mapCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
     mapCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
-    contentY = -40
+    contentY = -44
 
     local c1 = Check(mapCard, "Show teachers on world map", "mapPins", 10, contentY, "Pins for every beast that teaches a missing rank you can tame now.")
     c1:SetParent(mapCard)
@@ -2175,7 +2315,7 @@ do
     local colorCard = CreateSettingsCard(child, "Route Line Settings")
     colorCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
     colorCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
-    contentY = -40
+    contentY = -44
 
     local colorLabel = colorCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     colorLabel:SetPoint("TOPLEFT", 10, contentY)
@@ -2252,7 +2392,7 @@ do
     local alertsCard = CreateSettingsCard(child, "Alerts")
     alertsCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
     alertsCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
-    contentY = -40
+    contentY = -44
 
     local a1 = Check(alertsCard, "Alert on target/mouseover", "alertTarget", 10, contentY, "Big message when you target a teaching beast.")
     a1:SetParent(alertsCard)
@@ -2297,7 +2437,7 @@ do
     local trackerCard = CreateSettingsCard(child, "Zone Tracker")
     trackerCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
     trackerCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
-    contentY = -40
+    contentY = -44
 
     local t1 = Check(trackerCard, "Show zone tracker", "tracker", 10, contentY, "Show panel listing tameable beasts in current zone.")
     t1:SetParent(trackerCard)
@@ -2321,7 +2461,7 @@ do
     local minimapCard = CreateSettingsCard(child, "Minimap & Waypoints")
     minimapCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
     minimapCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
-    contentY = -40
+    contentY = -44
 
     mmCheck = CreateFrame("CheckButton", nil, minimapCard, "UICheckButtonTemplate")
     mmCheck:SetSize(22, 22)
@@ -2443,15 +2583,23 @@ do
       edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 10,
       insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    card:SetBackdropColor(0.95, 0.92, 0.82, 0.3)
-    card:SetBackdropBorderColor(0.70, 0.62, 0.45, 0.6)
+    -- Enhanced spellbook card colors
+    card:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
+    card:SetBackdropBorderColor(0.70, 0.62, 0.45, 0.8)
 
     if title then
       local titleFs = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-      titleFs:SetPoint("TOPLEFT", 10, -8)
+      titleFs:SetPoint("TOPLEFT", 12, -10)
       titleFs:SetText(title)
-      titleFs:SetTextColor(1, 0.82, 0)
+      titleFs:SetTextColor(1, 0.82, 0) -- Gold
       card.title = titleFs
+
+      -- Subtle separator under title
+      local titleLine = card:CreateTexture(nil, "ARTWORK")
+      titleLine:SetColorTexture(0.67, 0.83, 0.45, 0.2)
+      titleLine:SetHeight(1)
+      titleLine:SetPoint("TOPLEFT", 10, -32)
+      titleLine:SetPoint("TOPRIGHT", -10, -32)
     end
 
     return card
@@ -2468,20 +2616,20 @@ do
     exportCard:SetHeight(150)
 
     local exportDesc = exportCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    exportDesc:SetPoint("TOPLEFT", 10, -28)
+    exportDesc:SetPoint("TOPLEFT", 10, -44)
     exportDesc:SetWidth(500)
     exportDesc:SetJustifyH("LEFT")
     exportDesc:SetWordWrap(true)
     exportDesc:SetText("Copy this text to back up your learned ranks or move them to another character/PC.")
 
-    local exportBox, exportBg = TextArea(exportCard, 10, -50, 540, 80)
+    local exportBox, exportBg = TextArea(exportCard, 10, -60, 540, 80)
     exportBox:SetScript("OnTextChanged", function(self, user)
       if user then self:SetText(ns.Export()); self:HighlightText() end
     end)
     exportBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
 
     local selectBtn = Button(exportCard, "Select All", 100, function() exportBox:SetFocus(); exportBox:HighlightText() end)
-    selectBtn:SetPoint("TOPLEFT", 10, -136)
+    selectBtn:SetPoint("TOPLEFT", 10, -146)
 
     y = y + 160
 
@@ -2492,16 +2640,16 @@ do
     importCard:SetHeight(170)
 
     local importDesc = importCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    importDesc:SetPoint("TOPLEFT", 10, -28)
+    importDesc:SetPoint("TOPLEFT", 10, -44)
     importDesc:SetWidth(500)
     importDesc:SetJustifyH("LEFT")
     importDesc:SetWordWrap(true)
     importDesc:SetText("Paste an export text below and click Import. This only ADDS ranks - nothing is removed.")
 
-    local importBox, importBg = TextArea(importCard, 10, -50, 540, 80)
+    local importBox, importBg = TextArea(importCard, 10, -60, 540, 80)
 
     local result = importCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    result:SetPoint("TOPLEFT", 10, -136)
+    result:SetPoint("TOPLEFT", 10, -146)
 
     local importBtn = Button(importCard, "Import", 100, function()
       local added, skipped, tamedAdded = ns.Import(importBox:GetText())
@@ -2525,7 +2673,7 @@ do
     infoCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
 
     local infoText = infoCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    infoText:SetPoint("TOPLEFT", 10, -28)
+    infoText:SetPoint("TOPLEFT", 10, -44)
     infoText:SetWidth(500)
     infoText:SetJustifyH("LEFT")
     infoText:SetWordWrap(true)
@@ -2543,7 +2691,7 @@ do
     resetCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
 
     local resetDesc = resetCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    resetDesc:SetPoint("TOPLEFT", 10, -28)
+    resetDesc:SetPoint("TOPLEFT", 10, -44)
     resetDesc:SetWidth(500)
     resetDesc:SetJustifyH("LEFT")
     resetDesc:SetWordWrap(true)
