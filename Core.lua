@@ -722,6 +722,17 @@ local function CharKey()
   return name
 end
 
+-- A copy of the chronicle for the account-wide backup. Daily map trails are
+-- left out: they're most of its size and would double the saved file.
+local function CopyChronicle(t)
+  if type(t) ~= "table" then return t end
+  local out = {}
+  for k, v in pairs(t) do
+    if k ~= "trail" then out[k] = CopyChronicle(v) end
+  end
+  return out
+end
+
 local function InitDB()
   BeastTrainingTrackerDB = BeastTrainingTrackerDB or {}
   BeastTrainingTrackerBackup = BeastTrainingTrackerBackup or {}
@@ -762,13 +773,25 @@ local function InitDB()
       end
     end
   end
+  -- the chronicle comes back whole if this character's copy is gone or empty
+  -- (ids like "p1" restart per character, so pets aren't merged one by one)
+  local restoredChron = 0
+  local bc = type(bk) == "table" and type(bk.chronicle) == "table" and bk.chronicle
+  local lc = db.chronicle
+  if bc and type(bc.pets) == "table" and next(bc.pets)
+    and not (type(lc) == "table" and type(lc.pets) == "table" and next(lc.pets)) then
+    db.chronicle = CopyChronicle(bc)
+    for _ in pairs(bc.pets) do restoredChron = restoredChron + 1 end
+  end
   local function SyncBackup()
-    BeastTrainingTrackerBackup[key] = { known = db.known, tamedRares = db.tamedRares, tamedNicks = db.tamedNicks, petLinks = db.petLinks }
+    BeastTrainingTrackerBackup[key] = { known = db.known, tamedRares = db.tamedRares, tamedNicks = db.tamedNicks, petLinks = db.petLinks,
+      chronicle = type(db.chronicle) == "table" and CopyChronicle(db.chronicle) or nil }
   end
   SyncBackup()
   ns.SyncBackup = SyncBackup
   if restored > 0 then Say(("restored %d learned ranks from backup."):format(restored)) end
   if restoredPets > 0 then Say(("restored %d tamed special pets from backup."):format(restoredPets)) end
+  if restoredChron > 0 then Say(("restored the chronicle of %d companion%s from backup."):format(restoredChron, restoredChron == 1 and "" or "s")) end
 
   -- one-time note after updating to a new version
   local v = ns.Version()

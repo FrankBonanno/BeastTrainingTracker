@@ -110,6 +110,30 @@ test("backup restores learned ranks and tamed pets if saved data is lost", funct
   eq(ns2.db.tamedNicks["The Rake"], "Kittery", "nickname not restored")
 end)
 
+test("backup restores the chronicle (without map trails) if saved data is lost", function()
+  local ns = H.load()
+  -- Chronicle.lua isn't loaded by the harness; the backup lives in Core.lua
+  ns.db.chronicle = { nextId = 2, byGuid = {}, byName = { ["Bruin|Bear"] = "p1" }, pets = {
+    p1 = { id = "p1", name = "Bruin", family = "Bear", seconds = 600,
+      days = { ["2026-11-20"] = { seconds = 600, trail = { { 1, 2, 3 } } } }, entries = { { k = "start" } } } } }
+  H.fire("PLAYER_LOGOUT")
+  local backup = H.deepcopy(BeastTrainingTrackerBackup)
+  eq(backup["Tester-TestRealm"].chronicle.pets.p1.days["2026-11-20"].trail, nil, "trail should not be backed up")
+  ok(ns.db.chronicle.pets.p1.days["2026-11-20"].trail, "backup must not strip the live trail")
+
+  local ns2 = H.load({ backup = backup })
+  local rec = ns2.db.chronicle.pets.p1
+  ok(rec, "chronicle not restored")
+  eq(rec.name, "Bruin")
+  eq(rec.days["2026-11-20"].seconds, 600)
+  eq(ns2.db.chronicle.nextId, 2)
+  ok(H.said("restored the chronicle of 1 companion"), "no restore message")
+
+  -- a live chronicle is never replaced by the backup
+  local ns3 = H.load({ backup = backup, db = { chronicle = { pets = { p1 = { id = "p1", name = "Wolfie" } } } } })
+  eq(ns3.db.chronicle.pets.p1.name, "Wolfie")
+end)
+
 test("reset wipes learned ranks but keeps the tamed collection", function()
   local ns = H.load()
   ns.db.known["Bite#1"] = true
