@@ -1,7 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(git commit -m 'fix: SetScript nil reference errors on all tabs *)",
+      "Bash(lua -e \"loadfile\\('UI.lua'\\)\")",
+      "Bash(git commit -m 'fix: use global CreateFrame instead of method call in Settings tab *)",
+      "Bash(git commit -m 'refactor\\(v2.0\\): completely redesign UITheme.lua with WoW Forever Spellbook aesthetic *)",
+      "Bash(luac -o /dev/null UI.lua)",
+      "Bash(git commit -m 'fix: add backward-compatible color aliases to UITheme *)",
+      "Bash(grep -n \"^do$\" UI.lua)",
+      "Bash(git commit -m 'fix: replace missing tab icons with valid WoW Forever paths *)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\frank\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-frank-OneDrive-Desktop-BeastTrainingTracker\\\\71261f50-3b49-45e5-a51d-b0dc4f0f9dd0\\\\images\" | Sort-Object { [int]\\($_.BaseName -replace '\\\\D',''\\) } | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize)",
+      "Read(//c/Program Files \\\\\\(x86\\\\\\)/World of Warcraft/_forever_/Interface/AddOns/BeastTrainingTracker/**)",
+      "Read(//c/Program Files \\\\\\(x86\\\\\\)/World of Warcraft/_forever_/Interface/AddOns/**)"
     ]
   }
 }

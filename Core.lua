@@ -884,6 +884,77 @@ function ns.PrintStatus()
 end
 
 ------------------------------------------------------------------------
+-- /btt dumpbook: records the open spellbook's art into SavedVariables so the
+-- addon window can reuse the exact same Blizzard textures.
+------------------------------------------------------------------------
+local function DumpSpellbook()
+  local root = PlayerSpellsFrame or SpellBookFrame
+  if not (root and root:IsVisible()) then
+    Say("open your spellbook first (the Pet tab is best), then run /btt dumpbook again.")
+    return
+  end
+  local entries, seen = {}, {}
+  local function pass(ok, ...) if ok then return ... end end
+  local function try(f, ...) return pass(pcall(f, ...)) end
+  local function nameOf(obj, fallback)
+    return try(obj.GetDebugName, obj) or try(obj.GetName, obj) or fallback
+  end
+  local function walk(frame, depth)
+    if not frame or seen[frame] or depth > 14 then return end
+    seen[frame] = true
+    entries[#entries + 1] = {
+      kind = "Frame", path = nameOf(frame, "?"), otype = try(frame.GetObjectType, frame),
+      shown = try(frame.IsShown, frame), w = try(frame.GetWidth, frame), h = try(frame.GetHeight, frame),
+    }
+    for i, r in ipairs(try(function() return { frame:GetRegions() } end) or {}) do
+      local t = try(r.GetObjectType, r)
+      local e = { kind = t, path = nameOf(r, nameOf(frame, "?") .. ".region" .. i), shown = try(r.IsShown, r),
+        w = try(r.GetWidth, r), h = try(r.GetHeight, r), layer = try(r.GetDrawLayer, r) }
+      if t == "Texture" then
+        e.atlas = r.GetAtlas and try(r.GetAtlas, r)
+        local n = try(r.GetNumPoints, r) or 0
+        if n > 0 then
+          local p, rel, rp, x, y = try(r.GetPoint, r, 1)
+          e.point = { p, rel and nameOf(rel, "?"), rp, x, y, n }
+        end
+        e.tex = try(r.GetTexture, r)
+        e.file = r.GetTextureFilePath and try(r.GetTextureFilePath, r)
+        e.coords = { try(r.GetTexCoord, r) }
+        e.color = { try(r.GetVertexColor, r) }
+        e.alpha = try(r.GetAlpha, r)
+        e.blend = try(r.GetBlendMode, r)
+      elseif t == "FontString" then
+        e.text = try(r.GetText, r)
+        e.font = { try(r.GetFont, r) }
+        e.color = { try(r.GetTextColor, r) }
+        local fo = try(r.GetFontObject, r)
+        e.fontObject = fo and try(fo.GetName, fo)
+        e.shadow = { try(r.GetShadowColor, r) }
+      end
+      entries[#entries + 1] = e
+    end
+    for _, c in ipairs(try(function() return { frame:GetChildren() } end) or {}) do walk(c, depth + 1) end
+  end
+  walk(root, 0)
+
+  local templates = {}
+  for _, name in ipairs({ "PortraitFrameTemplate", "ButtonFrameTemplate", "PortraitFrameFlatTemplate",
+    "SearchBoxTemplate", "UIPanelButtonTemplate", "PagingControlsHorizontalTemplate", "PagingControlsTemplate",
+    "SpellBookItemTemplate", "UIPanelCloseButton", "UIPanelScrollFrameTemplate", "MinimalScrollBar",
+    "WowScrollBoxList", "UICheckButtonTemplate", "MaximizeMinimizeButtonFrameTemplate" }) do
+    local info = C_XMLUtil and C_XMLUtil.GetTemplateInfo and try(C_XMLUtil.GetTemplateInfo, name)
+    templates[name] = info and { type = info.type, width = info.width, height = info.height, inherits = info.inherits } or false
+  end
+
+  BeastTrainingTrackerBackup = BeastTrainingTrackerBackup or {}
+  BeastTrainingTrackerBackup.__uiDump = {
+    when = time(), build = { GetBuildInfo() }, root = nameOf(root, "?"),
+    entries = entries, templates = templates,
+  }
+  Say(("recorded %d spellbook pieces. Now type /reload so they get saved."):format(#entries))
+end
+
+------------------------------------------------------------------------
 -- Slash commands
 ------------------------------------------------------------------------
 SLASH_BEASTTRAININGTRACKER1 = "/btt"
@@ -904,8 +975,14 @@ SlashCmdList.BEASTTRAININGTRACKER = function(msg)
     Say("zone tracker " .. (ns.db.opts.tracker and "shown" or "hidden"))
     ns.Refresh()
   elseif msg == "hunt" or msg == "pet" or msg == "map" or msg == "settings" or msg == "backup" or msg == "export"
-    or msg == "import" or msg == "rarepets" or msg == "abilities" then
-    local key = ({ export = "backup", import = "backup", rarepets = "rares", settings = "map" })[msg] or msg
+    or msg == "import" or msg == "rarepets" or msg == "abilities" or msg == "trophies" or msg == "milestones"
+    or msg == "skinning" or msg == "chronicle" or msg == "companions" then
+    local key = ({ export = "backup", import = "backup", rarepets = "rares", settings = "map",
+      milestones = "trophies", companions = "chronicle" })[msg] or msg
+    if ns.Book then
+      if msg == "milestones" then ns.Book.state.trophyView = "seals" end
+      if msg == "chronicle" or msg == "companions" then ns.Book.state.chronView = msg end
+    end
     if ns.ShowTab and ns.TAB then ns.ShowTab(ns.TAB[key]) end
   elseif msg:match("^where ") then
     if ns.Geo then ns.Geo.Explain(raw:match("^%S+%s+(.-)$")) end
@@ -927,6 +1004,12 @@ SlashCmdList.BEASTTRAININGTRACKER = function(msg)
     end
   elseif msg == "clearwp" then
     if ns.Geo then ns.Geo.ClearWaypoints() end
+  elseif msg == "dumpbook" then
+    DumpSpellbook()
+  elseif msg == "book" then
+    if ns.ToggleBook then ns.ToggleBook() end
+  elseif msg == "mapcheck" then
+    if ns.Chronicle and ns.Chronicle.MapCheck then ns.Chronicle.MapCheck() end
   elseif msg == "debug" then
     ns.debugOn = true
     pcall(dbgFrame.RegisterAllEvents, dbgFrame)
