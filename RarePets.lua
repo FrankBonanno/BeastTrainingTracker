@@ -39,6 +39,7 @@ local P = {
   { "Duskstalker", "Cat", "9", "Teldrassil", 1.4, "R" },
   { "Dishu", "Cat", "13", "The Barrens", 1.5, "R" },
   { "Rak'shiri", "Cat", "57", "Winterspring", 1.5, "R" },
+  { "Ta'shkal", "Cat", "58", "Mount Hyjal", 1.0, "SU" },
   { "The Rake", "Cat", "10", "The Golden Plains, Mulgore", 1.2, "R" },
   { "Ripscale", "Crocolisk", "39", "Dustwallow Marsh", nil, "R" },
   { "Sewer Beast", "Crocolisk", "50", "Stormwind City", nil, "R" },

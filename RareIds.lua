@@ -68,6 +68,7 @@ ns.rareIds = {
   ["Sri'skulk"] = 10359,
   ["Strider Clutchmother"] = 2172,
   ["Takk the Leaper"] = 5842,
+  ["Ta'shkal"] = 268231,
   ["The Rake"] = 5807,
   ["Timber"] = 1132,
   ["Uhk'loc"] = 6585,

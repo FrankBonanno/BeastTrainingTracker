@@ -711,7 +711,15 @@ local DEFAULTS = {
 }
 
 local function CharKey()
-  return (UnitName("player") or "?") .. "-" .. (GetRealmName() or "?")
+  local name = UnitName("player") or "?"
+  local realm = GetRealmName() or ""
+  -- Realm name is available: use standard "FirstName-RealmName" format
+  if realm ~= "" then
+    return name .. "-" .. realm
+  end
+  -- Forever server: UnitName includes both first and last name, realm is unavailable
+  -- Full name (e.g. "John Smith") provides unique identification
+  return name
 end
 
 local function InitDB()

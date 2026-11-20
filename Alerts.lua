@@ -107,7 +107,9 @@ local function PetLevelChanged()
           if ns.IsKnown(ab, r.rank) then
             ns.Say(("|cff40ff40%s can now be taught %s %d|r - you already know it, open Beast Training."):format(pet, ab.name, r.rank))
           else
-            ns.Say(("|cffffd100Your pet can now learn %s %d.|r Teachers in %s."):format(ab.name, r.rank, ns.TeacherZones(ab, r, 3)))
+            local zone = ns.TeacherZones(ab, r, 3)
+            local prefix = ab.src == "trainer" and "Taught by" or "Teachers in"
+            ns.Say(("|cffffd100Your pet can now learn %s %d.|r %s %s."):format(ab.name, r.rank, prefix, zone))
           end
         end
       end

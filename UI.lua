@@ -961,6 +961,21 @@ do
   local count = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   count:SetPoint("TOPRIGHT", -8, -56)
 
+  local searchLabel = Text(p, "GameFontNormalSmall", 10, -80, "Search")
+  local search = CreateFrame("EditBox", nil, p, "InputBoxTemplate")
+  search:SetSize(200, 20)
+  search:SetPoint("LEFT", searchLabel, "RIGHT", 12, 0)
+  search:SetAutoFocus(false)
+  search:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus() end)
+  search:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+  search:SetScript("OnTextChanged", function(self)
+    ns.rareSearch = (self:GetText() or ""):lower():match("^%s*(.-)%s*$")
+    p.Refresh()
+  end)
+  local hint = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  hint:SetPoint("LEFT", search, "RIGHT", 10, 0)
+  hint:SetText("name, family or zone")
+
   -- columns (x is relative to the row)
   local COLS = {
     { x = 52, w = 132, head = "Name" },
@@ -971,7 +986,7 @@ do
     { x = 424, w = 104, head = "Traits" },
     { x = 530, w = 104, head = "Zone" },
   }
-  local headY = -80
+  local headY = -103
   for _, c in ipairs(COLS) do
     local fs = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     fs:SetPoint("TOPLEFT", 2 + c.x, headY)
@@ -1222,13 +1237,17 @@ do
     local list = ns.RS.AllRares(o.rareSortSpeed)
     local tamed = 0
     local items = {}
+    local s = ns.rareSearch
+    local searching = s and s ~= ""
     for _, r in ipairs(list) do
       if r.tamed then tamed = tamed + 1 end
       local tameable = ns.CanTame(r.t)
       local sp = r.t
       local typeOk = (o.spShowRare and sp.rare) or (o.spShowElite and sp.elite) or (o.spShowSpawned and sp.spawned)
+      -- Search filter: match name, family, or zone
+      local matches = not searching or r.name:lower():find(s, 1, true) or sp.family:lower():find(s, 1, true) or sp.zone:lower():find(s, 1, true)
       if typeOk and (o.spShowDungeon or not sp.dungeon)
-        and not (o.rareHideTamed and r.tamed) and not (o.rareHideHigh and not tameable) then
+        and not (o.rareHideTamed and r.tamed) and not (o.rareHideHigh and not tameable) and matches then
         local nameColor = r.tamed and "|cff9d9d9d" or (tameable and "|cffff8000" or "|cff996030")
         local status
         if r.tamed then
