@@ -24,6 +24,8 @@ RespawnData.lua
 RareData.lua
 #@end-do-not-package@
 Core.lua
+UITheme.lua
+UIComponents.lua
 Geo.lua
 Rares.lua
 Alerts.lua

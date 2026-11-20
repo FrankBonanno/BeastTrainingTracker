@@ -1123,7 +1123,7 @@ do
     child:SetHeight(math.max(1, y))
   end
 
-  p:SetScript("OnShow", p.Refresh)
+  p:SetScript("OnShow", function() p.Refresh() end)
 end
 
 ------------------------------------------------------------------------
@@ -1425,7 +1425,7 @@ do
     end
   end
 
-  p:SetScript("OnShow", p.Refresh)
+  p:SetScript("OnShow", function() p.Refresh() end)
 end
 
 ------------------------------------------------------------------------
@@ -1872,7 +1872,7 @@ do
     end
   end
 
-  p:SetScript("OnShow", p.Refresh)
+  p:SetScript("OnShow", function() p.Refresh() end)
 end
 
 ------------------------------------------------------------------------
@@ -2057,7 +2057,7 @@ do
 
     child:SetHeight(math.max(1, y))
   end
-  p:SetScript("OnShow", p.Refresh)
+  p:SetScript("OnShow", function() p.Refresh() end)
 end
 
 ------------------------------------------------------------------------
@@ -2360,7 +2360,7 @@ do
     swatch.color:SetColorTexture(r, g, b, 1)
     alpha:SetValue(a)
   end
-  p:SetScript("OnShow", p.Refresh)
+  p:SetScript("OnShow", function() p.Refresh() end)
 end
 
 ------------------------------------------------------------------------
@@ -2557,7 +2557,7 @@ do
 
     child:SetHeight(math.max(1, y))
   end
-  p:SetScript("OnShow", p.Refresh)
+  p:SetScript("OnShow", function() p.Refresh() end)
 end
 
 ------------------------------------------------------------------------
