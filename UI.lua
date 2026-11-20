@@ -4,48 +4,175 @@ local abilities = ns.abilities
 local Geo = ns.Geo
 local Say = ns.Say
 
-local WIDTH, HEIGHT = 780, 630
-local LIST_W = WIDTH - 16 - 28
-local HEAD_H, ROW_H = 26, 18
+-- Phase 1: Use UITheme for window constraints
+local MIN_WIDTH, MAX_WIDTH = ns.UITheme.window.minWidth, ns.UITheme.window.maxWidth
+local MIN_HEIGHT, MAX_HEIGHT = ns.UITheme.window.minHeight, ns.UITheme.window.maxHeight
+local DEFAULT_WIDTH, DEFAULT_HEIGHT = ns.UITheme.window.defaultWidth, ns.UITheme.window.defaultHeight
+
 local GREEN, GOLD = "|cff40ff40", "|cffffd100"
+local HEAD_H, ROW_H = 26, 18
+local TAB_HEIGHT = 60
 
 local function C(r, g, b, a, tex) tex:SetColorTexture(r, g, b, a) return tex end
 
 ------------------------------------------------------------------------
--- Main frame + header
+-- Main frame: Resizable with Phase 1 parchment background
 ------------------------------------------------------------------------
 local f = CreateFrame("Frame", "BeastTrainingTrackerFrame", UIParent, "BasicFrameTemplateWithInset")
-f:SetSize(WIDTH, HEIGHT)
+f:SetSize(DEFAULT_WIDTH, DEFAULT_HEIGHT)
 f:SetPoint("CENTER")
 f:SetFrameStrata("HIGH")
 f:SetMovable(true)
 f:EnableMouse(true)
 f:SetClampedToScreen(true)
 f:RegisterForDrag("LeftButton")
+f:SetResizable(true)
 f:Hide()
 tinsert(UISpecialFrames, "BeastTrainingTrackerFrame")
 
+-- Parchment background from UITheme
+local parchmentBg = f:CreateTexture(nil, "BACKGROUND")
+parchmentBg:SetAllPoints()
+parchmentBg:SetColorTexture(ns.UITheme.colors.parchment.r, ns.UITheme.colors.parchment.g, ns.UITheme.colors.parchment.b)
+
+-- Title
 local title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-title:SetPoint("TOP", 0, -6)
+title:SetPoint("TOPLEFT", 16, -12)
 title:SetText("|cffabd473Beast Training Tracker|r")
 
-local bigIcon = f:CreateTexture(nil, "ARTWORK")
-bigIcon:SetSize(40, 40)
-bigIcon:SetPoint("TOPLEFT", 16, -32)
+-- Resize handle (bottom-right corner)
+local resizer = CreateFrame("Button", nil, f)
+resizer:SetSize(16, 16)
+resizer:SetPoint("BOTTOMRIGHT", -2, 2)
+resizer:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-ResizeGrabber-Down")
+resizer:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-ResizeGrabber-Highlight")
+resizer:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-ResizeGrabber-Down")
+resizer:SetScript("OnMouseDown", function(self, button)
+  if button == "LeftButton" then
+    f:StartSizing("BOTTOMRIGHT")
+  end
+end)
+resizer:SetScript("OnMouseUp", function()
+  f:StopMovingOrSizing()
+  local w, h = f:GetSize()
+  -- Clamp to min/max
+  w = math.max(MIN_WIDTH, math.min(MAX_WIDTH, w))
+  h = math.max(MIN_HEIGHT, math.min(MAX_HEIGHT, h))
+  f:SetSize(w, h)
+  -- Save to db
+  if ns.db then
+    local p, _, rp, x, y = f:GetPoint()
+    ns.db.pos = { p, rp, x, y }
+    ns.db.frameSize = { w, h }
+  end
+end)
+
+------------------------------------------------------------------------
+-- Icon tabs (60px height at top)
+------------------------------------------------------------------------
+local TAB_NAMES = { "Abilities", "Hunt Planner", "Special Pets", "My Pet", "Settings", "Backup" }
+local TAB_ICONS = {
+  "Interface\\Icons\\Ability_Hunter_BeastTraining",
+  "Interface\\Icons\\Spell_Nature_HuntsmansMark",
+  "Interface\\Icons\\Ability_Hunter_CmonCat",
+  "Interface\\Icons\\Ability_Paladin_HolyLight",
+  "Interface\\Icons\\Inv_Weapon_Hand_15",
+  "Interface\\Icons\\Inv_Misc_SummonPouch"
+}
+
+ns.TAB = { abilities = 1, hunt = 2, rares = 3, pet = 4, map = 5, backup = 6 }
+local tabs, panels = {}, {}
+
+local tabContainer = CreateFrame("Frame", nil, f)
+tabContainer:SetPoint("TOPLEFT", 0, -32)
+tabContainer:SetPoint("TOPRIGHT", 0, -32)
+tabContainer:SetHeight(TAB_HEIGHT)
+
+-- Tab background
+local tabBg = tabContainer:CreateTexture(nil, "BACKGROUND")
+tabBg:SetAllPoints(tabContainer)
+tabBg:SetColorTexture(ns.UITheme.colors.parchmentDark.r, ns.UITheme.colors.parchmentDark.g, ns.UITheme.colors.parchmentDark.b)
+
+local tabDivider = C(0.67, 0.83, 0.45, 0.25, tabContainer:CreateTexture(nil, "ARTWORK"))
+tabDivider:SetHeight(1)
+tabDivider:SetPoint("BOTTOMLEFT")
+tabDivider:SetPoint("BOTTOMRIGHT")
+
+local function StyleTab(b, sel)
+  if sel then
+    b.bg:SetColorTexture(ns.UITheme.colors.highlight.r, ns.UITheme.colors.highlight.g, ns.UITheme.colors.highlight.b, 0.22)
+    b.accent:Show()
+  else
+    b.bg:SetColorTexture(0, 0, 0, 0.35)
+    b.accent:Hide()
+  end
+end
+
+for i, name in ipairs(TAB_NAMES) do
+  local b = CreateFrame("Button", nil, tabContainer)
+  b:SetSize(56, TAB_HEIGHT - 4)
+  b:SetPoint("TOPLEFT", 8 + (i - 1) * 62, -2)
+
+  b.bg = b:CreateTexture(nil, "BACKGROUND")
+  b.bg:SetAllPoints()
+  b.accent = C(ns.UITheme.colors.highlight.r, ns.UITheme.colors.highlight.g, ns.UITheme.colors.highlight.b, 0.9, b:CreateTexture(nil, "ARTWORK"))
+  b.accent:SetHeight(2)
+  b.accent:SetPoint("BOTTOMLEFT")
+  b.accent:SetPoint("BOTTOMRIGHT")
+
+  local icon = b:CreateTexture(nil, "ARTWORK")
+  icon:SetSize(40, 40)
+  icon:SetPoint("CENTER")
+  icon:SetTexture(TAB_ICONS[i])
+  icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+  local hl = b:CreateTexture(nil, "HIGHLIGHT")
+  hl:SetAllPoints()
+  hl:SetColorTexture(1, 1, 1, 0.06)
+
+  b:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:AddLine(name, 1, 0.82, 0)
+    GameTooltip:Show()
+  end)
+  b:SetScript("OnLeave", GameTooltip_Hide)
+  b:SetScript("OnClick", function() ns.ShowTab(i) end)
+
+  tabs[i] = b
+
+  -- Create panel for this tab
+  local p = CreateFrame("Frame", nil, f)
+  p:SetPoint("TOPLEFT", 8, -98)
+  p:SetPoint("BOTTOMRIGHT", -8, 8)
+  p:Hide()
+  panels[i] = p
+end
+
+------------------------------------------------------------------------
+-- Pet info bar (under tabs, above content)
+------------------------------------------------------------------------
+local petContainer = CreateFrame("Frame", nil, f)
+petContainer:SetPoint("TOPLEFT", 8, -98)
+petContainer:SetPoint("TOPRIGHT", -8, -98)
+petContainer:SetHeight(32)
+
+local bigIcon = petContainer:CreateTexture(nil, "ARTWORK")
+bigIcon:SetSize(24, 24)
+bigIcon:SetPoint("TOPLEFT", 0, 0)
 bigIcon:SetTexture("Interface\\Icons\\Ability_Hunter_BeastTraining")
 bigIcon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
-local petText = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+local petText = petContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 petText:SetPoint("TOPLEFT", bigIcon, "TOPRIGHT", 10, -2)
 petText:SetJustifyH("LEFT")
 
-local zoneText = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+local zoneText = petContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 zoneText:SetPoint("TOPLEFT", petText, "BOTTOMLEFT", 0, -4)
 zoneText:SetJustifyH("LEFT")
 
-local bar = CreateFrame("StatusBar", nil, f)
-bar:SetSize(260, 18)
-bar:SetPoint("TOPRIGHT", -150, -36)
+local bar = CreateFrame("StatusBar", nil, petContainer)
+bar:SetSize(200, 16)
+bar:SetPoint("TOPRIGHT", -120, 2)
 bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
 bar:SetStatusBarColor(0.67, 0.83, 0.45)
 bar:SetMinMaxValues(0, 1)
@@ -60,12 +187,12 @@ end
 local barText = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 barText:SetPoint("CENTER")
 
-local syncText = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-syncText:SetPoint("TOPRIGHT", bar, "BOTTOMRIGHT", 0, -6)
+local syncText = petContainer:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+syncText:SetPoint("TOPRIGHT", bar, "BOTTOMRIGHT", 0, -4)
 syncText:SetJustifyH("RIGHT")
 
--- Optional addon indicators (green = detected). Click to open Settings.
-local addonStrip = CreateFrame("Button", nil, f)
+-- Optional addon indicators
+local addonStrip = CreateFrame("Button", nil, petContainer)
 addonStrip:SetHeight(14)
 addonStrip:SetPoint("TOPLEFT", zoneText, "BOTTOMLEFT", 0, -4)
 addonStrip.text = addonStrip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -97,8 +224,7 @@ local function UpdateAddonStrip()
 end
 
 ------------------------------------------------------------------------
--- "Beast Training" button (secure: casts the spell that opens the window).
--- Lives on UIParent so the main window stays usable in combat.
+-- "Beast Training" button (secure: casts the spell that opens the window)
 ------------------------------------------------------------------------
 local BT_SPELL = (GetSpellInfo and GetSpellInfo(5149))
   or (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(5149)) or "Beast Training"
@@ -119,10 +245,10 @@ teach:SetScript("OnEnter", function(self)
 end)
 teach:SetScript("OnLeave", GameTooltip_Hide)
 
--- Clear the hunt route / waypoints (sits under the Beast Training button)
-local clearRoute = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-clearRoute:SetSize(124, 20)
-clearRoute:SetPoint("TOPRIGHT", -16, -60)
+-- Clear the hunt route / waypoints
+local clearRoute = CreateFrame("Button", nil, petContainer, "UIPanelButtonTemplate")
+clearRoute:SetSize(120, 20)
+clearRoute:SetPoint("TOPRIGHT", -4, 2)
 clearRoute:SetText("Clear waypoints")
 clearRoute:SetScript("OnClick", function() ns.Geo.ClearWaypoints() end)
 clearRoute:SetScript("OnEnter", function(self)
@@ -138,10 +264,9 @@ clearRoute:SetScript("OnLeave", GameTooltip_Hide)
 local function PlaceTeach()
   if InCombatLockdown() then return end
   if f:IsShown() and f:GetRight() then
-    -- same effective scale as the window, so the window's coordinates can be used directly
     teach:SetScale(f:GetEffectiveScale() / UIParent:GetEffectiveScale())
     teach:ClearAllPoints()
-    teach:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", f:GetRight() - 16, f:GetTop() - 32)
+    teach:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", f:GetRight() - 16, f:GetTop() - 60)
     teach:SetFrameLevel(f:GetFrameLevel() + 20)
     teach:Show()
   else
@@ -232,13 +357,12 @@ local function Scroll(parent, top, bottom)
   scroll:SetPoint("TOPLEFT", 2, top)
   scroll:SetPoint("BOTTOMRIGHT", -26, bottom)
   local child = CreateFrame("Frame", nil, scroll)
-  child:SetSize(LIST_W, 1)
+  child:SetSize(400, 1)
   scroll:SetScrollChild(child)
   return scroll, child
 end
 
--- Generic list for Hunt / Pet tabs.
--- item = { kind = "head"|"row"|"note", icon=, left=, right=, onClick=, tip=fn(tt), button={text=, onClick=} }
+-- Generic list for Hunt / Pet tabs
 local function MakeList(parent, top, bottom)
   local L = { rows = {} }
   L.scroll, L.child = Scroll(parent, top, bottom)
@@ -363,7 +487,7 @@ local function ListSet(L, items, emptyMsg)
     row.left:SetPoint("LEFT", x, 0)
     row.left:SetPoint("RIGHT", row.right, "LEFT", -8, 0)
     row.left:SetText(it.left or "")
-    -- optional fixed columns: { {x=, w=, text=}, ... }
+    -- optional fixed columns
     row.cols = row.cols or {}
     local cols = it.cols or {}
     for ci, c in ipairs(cols) do
@@ -390,51 +514,8 @@ local function ListSet(L, items, emptyMsg)
 end
 
 ------------------------------------------------------------------------
--- Tabs
+-- Tab display logic
 ------------------------------------------------------------------------
-local TAB_NAMES = { "Abilities", "Hunt Planner", "Special Pets", "My Pet", "Settings", "Backup" }
-ns.TAB = { abilities = 1, hunt = 2, rares = 3, pet = 4, map = 5, backup = 6 }
-local tabs, panels = {}, {}
-
-local function StyleTab(b, sel)
-  if sel then
-    b.bg:SetColorTexture(0.67, 0.83, 0.45, 0.22)
-    b.accent:Show()
-    b.text:SetFontObject("GameFontHighlight")
-  else
-    b.bg:SetColorTexture(0, 0, 0, 0.35)
-    b.accent:Hide()
-    b.text:SetFontObject("GameFontNormal")
-  end
-end
-
-for i, name in ipairs(TAB_NAMES) do
-  local b = CreateFrame("Button", nil, f)
-  b:SetSize(120, 24)
-  b:SetPoint("TOPLEFT", 12 + (i - 1) * 124, -94)
-  b.bg = b:CreateTexture(nil, "BACKGROUND")
-  b.bg:SetAllPoints()
-  b.accent = C(0.67, 0.83, 0.45, 0.9, b:CreateTexture(nil, "ARTWORK"))
-  b.accent:SetHeight(2)
-  b.accent:SetPoint("BOTTOMLEFT")
-  b.accent:SetPoint("BOTTOMRIGHT")
-  b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  b.text:SetPoint("CENTER", 0, 1)
-  b.text:SetText(name)
-  local hl = b:CreateTexture(nil, "HIGHLIGHT")
-  hl:SetAllPoints()
-  hl:SetColorTexture(1, 1, 1, 0.06)
-  b:SetScript("OnClick", function() ns.ShowTab(i) end)
-  tabs[i] = b
-
-  local p = CreateFrame("Frame", nil, f)
-  p:SetPoint("TOPLEFT", 8, -124)
-  p:SetPoint("BOTTOMRIGHT", -8, 8)
-  p:Hide()
-  panels[i] = p
-end
-Divider(f, -119)
-
 local function CurrentTab() return (ns.db and ns.db.tab) or 1 end
 
 local function RefreshAll()
@@ -491,18 +572,19 @@ if C_Timer and C_Timer.NewTicker then
 end
 
 ------------------------------------------------------------------------
--- Tab 1: Abilities
+-- Tab 1: Abilities - Phase 2: Icon Grid with Collapsible Sections
 ------------------------------------------------------------------------
 do
   local p = panels[1]
-  local COL = { check = 26, rank = 48, lvl = 110, tp = 168, pet = 210, src = 262 }
 
+  -- Filter checkboxes (top of tab)
   Check(p, "My pet's family", "petOnly", 4, -2, "Only abilities your current pet's family can use.")
   Check(p, "Hide learned", "hideKnown", 142, -2, "Hide ranks you've learned (or outgrown by learning a higher rank).")
   Check(p, "Hide trainer skills", "hideTrainer", 262, -2, "Hide abilities bought from a Pet Trainer (Growl, resistances...).")
   Check(p, "Hide above pet level", "hideHigh", 414, -2, "Hide ranks your pet isn't high enough level to use yet (orange pet lvl).")
   Check(p, "Tameable in this zone", "zoneOnly", 570, -2, "Only ranks taught by a beast in the zone you're in.")
 
+  -- Search box
   local searchLabel = Text(p, "GameFontNormalSmall", 10, -36, "Search")
   local search = CreateFrame("EditBox", nil, p, "InputBoxTemplate")
   search:SetSize(200, 20)
@@ -518,6 +600,7 @@ do
   hint:SetPoint("LEFT", search, "RIGHT", 10, 0)
   hint:SetText("ability, beast or zone")
 
+  -- Collapse/Expand All buttons
   local collapseAll = Button(p, "Collapse all", 96, function()
     for _, ab in ipairs(abilities) do ns.db.collapsed[ab.name] = true end
     p.Refresh()
@@ -529,29 +612,18 @@ do
   end)
   expandAll:SetPoint("RIGHT", collapseAll, "LEFT", -4, 0)
 
-  local colY = -64
-  local function ColHead(text, x)
-    local fs = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    fs:SetPoint("TOPLEFT", 2 + x, colY)
-    fs:SetText(text)
-  end
-  ColHead("Rank", COL.rank)
-  ColHead("Pet lvl", COL.lvl)
-  ColHead("TP", COL.tp)
-  ColHead("Where to tame it  " .. GREEN .. "(green = in your zone)|r", COL.src)
-  Divider(p, colY - 14)
-
-  local scroll, child = Scroll(p, colY - 18, 22)
+  -- Scroll frame for content
+  local scroll, child = Scroll(p, -64, 22)
   local emptyText = child:CreateFontString(nil, "OVERLAY", "GameFontDisable")
   emptyText:SetPoint("TOP", 0, -40)
   emptyText:SetText("Nothing matches these filters.")
 
+  -- Footer instructions
   local footer = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   footer:SetPoint("BOTTOMLEFT", 6, 4)
-  footer:SetText("Click a rank: add a teacher to your route  ·  Shift-click: new route to all its teachers  ·  Click an ability to collapse")
+  footer:SetText("Click a rank: add a teacher to your route  ·  Shift-click: new route to all its teachers  ·  Click ability name to collapse")
 
-  local rows = {}
-
+  -- Helper: Find best teacher for a rank
   local function BestTeacher(r, zone)
     local best, bs
     for _, t in ipairs(r.teachers) do
@@ -561,21 +633,13 @@ do
     return best
   end
 
-  local function RowTooltip(row)
-    local d = row.data
+  -- Tooltip for rank cells
+  local function RankCellTooltip(rankCell)
+    local d = rankCell.data
     if not d then return end
     local ab = d.ab
-    GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
-    if d.header then
-      GameTooltip:AddLine(ab.name, 1, 0.82, 0)
-      GameTooltip:AddLine(ab.isAll and "All pet families" or ab.famText, 1, 1, 1, true)
-      GameTooltip:AddLine(ab.src == "trainer" and "Bought from a Pet Trainer" or "Learned by taming a beast that has it", 0.6, 0.8, 1)
-      GameTooltip:AddLine(" ")
-      GameTooltip:AddLine(ns.db.collapsed[ab.name] and "Click to expand" or "Click to collapse", 0.5, 0.5, 0.5)
-      GameTooltip:Show()
-      return
-    end
     local r = d.rank
+    GameTooltip:SetOwner(rankCell, "ANCHOR_RIGHT")
     GameTooltip:AddLine(("%s (Rank %d)"):format(ab.name, r.rank), 1, 0.82, 0)
     GameTooltip:AddLine(r.effect, 1, 1, 1, true)
     GameTooltip:AddLine(("Pet level %d  -  %d TP"):format(r.level, r.tp), 0.8, 0.8, 0.8)
@@ -608,111 +672,21 @@ do
     GameTooltip:Show()
   end
 
-  local function FS(parent, x, w)
-    local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    fs:SetPoint("LEFT", x, 0)
-    if w then fs:SetWidth(w) end
-    fs:SetJustifyH("LEFT")
-    fs:SetWordWrap(false)
-    return fs
+  -- Tooltip for ability headers
+  local function HeaderTooltip(header)
+    local d = header.data
+    if not d then return end
+    local ab = d.ab
+    GameTooltip:SetOwner(header, "ANCHOR_RIGHT")
+    GameTooltip:AddLine(ab.name, 1, 0.82, 0)
+    GameTooltip:AddLine(ab.isAll and "All pet families" or ab.famText, 1, 1, 1, true)
+    GameTooltip:AddLine(ab.src == "trainer" and "Bought from a Pet Trainer" or "Learned by taming a beast that has it", 0.6, 0.8, 1)
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddLine(ns.db.collapsed[ab.name] and "Click to expand" or "Click to collapse", 0.5, 0.5, 0.5)
+    GameTooltip:Show()
   end
 
-  local function GetRow(i)
-    local row = rows[i]
-    if row then return row end
-    row = CreateFrame("Button", nil, child)
-    row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
-    row.bg = row:CreateTexture(nil, "BACKGROUND")
-    row.bg:SetAllPoints()
-    row.line = C(0.85, 0.65, 0.15, 0.35, row:CreateTexture(nil, "BORDER"))
-    row.line:SetHeight(1)
-    row.line:SetPoint("BOTTOMLEFT")
-    row.line:SetPoint("BOTTOMRIGHT")
-
-    row.toggle = row:CreateTexture(nil, "ARTWORK")
-    row.toggle:SetSize(14, 14)
-    row.toggle:SetPoint("LEFT", 4, 0)
-    row.icon = row:CreateTexture(nil, "ARTWORK")
-    row.icon:SetSize(20, 20)
-    row.icon:SetPoint("LEFT", 22, 0)
-    row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-    row.head = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    row.head:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
-    row.tag = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.tag:SetPoint("RIGHT", -8, 0)
-    row.tag:SetJustifyH("RIGHT")
-    row.sub = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    row.sub:SetPoint("LEFT", row.head, "RIGHT", 10, 0)
-    row.sub:SetPoint("RIGHT", row.tag, "LEFT", -10, 0)
-    row.sub:SetJustifyH("LEFT")
-    row.sub:SetWordWrap(false)
-
-    row.box = row:CreateTexture(nil, "ARTWORK")
-    row.box:SetSize(16, 16)
-    row.box:SetPoint("LEFT", COL.check, 0)
-    row.box:SetTexture("Interface\\Buttons\\UI-CheckBox-Up")
-    row.check = row:CreateTexture(nil, "OVERLAY")
-    row.check:SetAllPoints(row.box)
-    row.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-    row.c1 = FS(row, COL.rank, 58)
-    row.c2 = FS(row, COL.lvl, 56)
-    row.c3 = FS(row, COL.tp, 40)
-    row.c4 = FS(row, COL.pet, 50)
-    row.c5 = FS(row, COL.src, LIST_W - COL.src - 6)
-
-    row:SetScript("OnEnter", RowTooltip)
-    row:SetScript("OnLeave", GameTooltip_Hide)
-    row:SetScript("OnClick", function(self)
-      local d = self.data
-      if not d then return end
-      if d.header then
-        ns.db.collapsed[d.ab.name] = (not ns.db.collapsed[d.ab.name]) or nil
-        p.Refresh()
-        if GameTooltip:GetOwner() == self then RowTooltip(self) end
-        return
-      end
-      local r = d.rank
-      if d.ab.src == "trainer" or #r.teachers == 0 then return end
-      if IsShiftKeyDown() then
-        local list = {}
-        for i2, t in ipairs(r.teachers) do
-          if i2 > 12 then break end
-          list[#list + 1] = { t = t, label = Geo.Label(d.ab, r, t) }
-        end
-        Geo.WaypointMany(list)
-      else
-        local t = BestTeacher(r, ns.CurrentZone())
-        if t then Geo.Waypoint(t, Geo.Label(d.ab, r, t)) end
-      end
-    end)
-    rows[i] = row
-    return row
-  end
-
-  local function SourceText(ab, r, zone)
-    if ab.src == "trainer" then return "|cff99ccffPet Trainer (any major city)|r" end
-    if #r.teachers == 0 then return "|cff808080No known source|r" end
-    local list = {}
-    for _, t in ipairs(r.teachers) do list[#list + 1] = t end
-    table.sort(list, function(a, b)
-      local ah, bh = ns.InZone(a, zone), ns.InZone(b, zone)
-      if ah ~= bh then return ah end
-      return a.minLevel < b.minLevel
-    end)
-    local parts = {}
-    for i = 1, math.min(2, #list) do
-      local t = list[i]
-      if ns.InZone(t, zone) then
-        parts[i] = ("%s%s (%s, %s)|r%s"):format(GREEN, t.name, t.level, t.zone, Geo.Tag(t.name))
-      else
-        parts[i] = ("|cffffffff%s|r |cff9d9d9d(%s, %s)|r%s"):format(t.name, t.level, t.zone, Geo.Tag(t.name))
-      end
-    end
-    local s = table.concat(parts, "; ")
-    if #list > 2 then s = s .. (" |cff808080+%d more|r"):format(#list - 2) end
-    return s
-  end
-
+  -- Search/filter matching logic
   local function Matches(s, ab, r)
     if not s or s == "" then return true end
     if ab.name:lower():find(s, 1, true) then return true end
@@ -723,122 +697,351 @@ do
     end
   end
 
+  -- Get color for a rank cell based on status
+  local function GetRankColor(status, canGet)
+    if status == "known" then
+      return 0x40, 0xff, 0x40 -- Green: known/learned
+    elseif status == "implied" then
+      return 0x5f, 0x9f, 0x5f -- Muted green: implied
+    elseif not canGet then
+      return 0x80, 0x80, 0x80 -- Gray: too high level
+    else
+      return 0xff, 0xd1, 0x00 -- Gold: can learn now
+    end
+  end
+
+  -- Sections and rank cells
+  local abilityRows = {} -- { { header, gridFrame, rankCells } }
+  local rankCells = {} -- Reusable rank cell frames
+
+  local function GetRankCell(index)
+    if rankCells[index] then return rankCells[index] end
+
+    local cell = CreateFrame("Button", nil, child)
+    cell:SetSize(60, 60)
+
+    -- Background texture
+    cell.bg = cell:CreateTexture(nil, "BACKGROUND")
+    cell.bg:SetAllPoints(cell)
+    cell.bg:SetColorTexture(0.5, 0.5, 0.5, 0.2)
+
+    -- Highlight
+    cell.hl = cell:CreateTexture(nil, "HIGHLIGHT")
+    cell.hl:SetAllPoints(cell)
+    cell.hl:SetColorTexture(1, 1, 1, 0.1)
+
+    -- Border
+    cell.border = cell:CreateTexture(nil, "ARTWORK")
+    cell.border:SetAllPoints(cell)
+    cell.border:SetColorTexture(0.5, 0.5, 0.5, 0.3)
+
+    -- Icon (ability icon)
+    cell.icon = cell:CreateTexture(nil, "ARTWORK")
+    cell.icon:SetSize(48, 48)
+    cell.icon:SetPoint("CENTER", 0, 4)
+    cell.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+    -- Rank number text
+    cell.rankText = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    cell.rankText:SetPoint("BOTTOM", 0, 2)
+    cell.rankText:SetText("R1")
+
+    cell:SetScript("OnEnter", function(self)
+      self.hl:SetColorTexture(1, 1, 1, 0.2)
+      RankCellTooltip(self)
+    end)
+
+    cell:SetScript("OnLeave", function(self)
+      self.hl:SetColorTexture(1, 1, 1, 0.1)
+      GameTooltip_Hide()
+    end)
+
+    cell:SetScript("OnClick", function(self)
+      local d = self.data
+      if not d then return end
+      local r = d.rank
+      local ab = d.ab
+      if ab.src == "trainer" or #r.teachers == 0 then return end
+      if IsShiftKeyDown() then
+        local list = {}
+        for i2, t in ipairs(r.teachers) do
+          if i2 > 12 then break end
+          list[#list + 1] = { t = t, label = Geo.Label(ab, r, t) }
+        end
+        Geo.WaypointMany(list)
+      else
+        local t = BestTeacher(r, ns.CurrentZone())
+        if t then Geo.Waypoint(t, Geo.Label(ab, r, t)) end
+      end
+    end)
+
+    rankCells[index] = cell
+    return cell
+  end
+
+  local function GetAbilityHeader(index)
+    if abilityRows[index] then return abilityRows[index].header end
+
+    local row = CreateFrame("Button", nil, child)
+    row:SetHeight(26)
+
+    -- Background
+    row.bg = row:CreateTexture(nil, "BACKGROUND")
+    row.bg:SetAllPoints(row)
+    row.bg:SetColorTexture(0.45, 0.33, 0.05, 0.28)
+
+    -- Toggle icon
+    row.toggle = row:CreateTexture(nil, "ARTWORK")
+    row.toggle:SetSize(14, 14)
+    row.toggle:SetPoint("LEFT", 4, 0)
+
+    -- Ability icon
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(20, 20)
+    row.icon:SetPoint("LEFT", 22, 0)
+    row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+    -- Ability name
+    row.name = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    row.name:SetPoint("LEFT", row.icon, "RIGHT", 8, 1)
+
+    -- Ranks progress
+    row.ranks = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.ranks:SetPoint("LEFT", row.name, "RIGHT", 12, 0)
+    row.ranks:SetJustifyH("LEFT")
+
+    -- Family info
+    row.family = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    row.family:SetPoint("RIGHT", -8, 1)
+    row.family:SetJustifyH("RIGHT")
+
+    row:SetScript("OnEnter", function(self)
+      self.bg:SetColorTexture(0.45, 0.33, 0.05, 0.4)
+      HeaderTooltip(self)
+    end)
+
+    row:SetScript("OnLeave", function(self)
+      self.bg:SetColorTexture(0.45, 0.33, 0.05, 0.28)
+      GameTooltip_Hide()
+    end)
+
+    row:SetScript("OnClick", function(self)
+      local d = self.data
+      if not d then return end
+      ns.db.collapsed[d.ab.name] = (not ns.db.collapsed[d.ab.name]) or nil
+      p.Refresh()
+      if GameTooltip:GetOwner() == self then HeaderTooltip(self) end
+    end)
+
+    local gridFrame = CreateFrame("Frame", nil, child)
+    gridFrame:SetHeight(100)
+
+    abilityRows[index] = { header = row, grid = gridFrame }
+    return row
+  end
+
   function p.Refresh()
     if not p:IsShown() then return end
     local o, lvl, fam, zone = ns.db.opts, ns.PetLevel(), ns.PetFamily(), ns.CurrentZone()
     local s = ns.search
     local searching = s and s ~= ""
-    local entries = {}
+
+    -- Collect filtered abilities and their visible ranks
+    local visibleAbilities = {}
 
     for _, ab in ipairs(abilities) do
       local show = not (o.hideTrainer and ab.src == "trainer")
         and not (o.petOnly and not ns.AbilityFitsPet(ab, fam))
         and not (o.zoneOnly and ab.src == "trainer")
+
       if show then
-        local list, have, hereCount = {}, 0, 0
+        local ranks = {} -- Ranks that pass filters
+        local have, hereCount = 0, 0
+
         for _, r in ipairs(ab.parsed) do
           local st = ns.Status(ab, r.rank)
           if st then have = have + 1 end
+
           local here = ns.HasTeacherHere(r, zone)
           if here and not st then hereCount = hereCount + 1 end
+
+          -- Apply visibility filters
           if not (o.hideKnown and st) and not (o.hideHigh and r.level > lvl)
             and not (o.zoneOnly and not here) and Matches(s, ab, r) then
-            list[#list + 1] = { ab = ab, rank = r, status = st }
+            ranks[#ranks + 1] = { ab = ab, rank = r, status = st }
           end
         end
-        if #list > 0 then
-          entries[#entries + 1] = { header = true, ab = ab, have = have, here = hereCount }
-          if searching or not ns.db.collapsed[ab.name] then
-            for _, e in ipairs(list) do entries[#entries + 1] = e end
-          end
+
+        if #ranks > 0 then
+          visibleAbilities[#visibleAbilities + 1] = {
+            ab = ab,
+            ranks = ranks,
+            have = have,
+            here = hereCount
+          }
         end
       end
     end
 
-    local y, stripe = 0, 0
-    for i, d in ipairs(entries) do
-      local row = GetRow(i)
-      row.data = d
-      row:ClearAllPoints()
-      row:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
-      row:SetPoint("RIGHT", child, "RIGHT")
-      row:Show()
-      if d.header then
-        local ab = d.ab
-        row:SetHeight(HEAD_H)
-        y = y + HEAD_H
-        stripe = 0
-        row.bg:SetColorTexture(0.45, 0.33, 0.05, 0.28)
-        row.line:Show()
-        row.box:Hide(); row.check:Hide()
-        for _, c in ipairs({ row.c1, row.c2, row.c3, row.c4, row.c5 }) do c:Hide() end
-        row.toggle:Show(); row.icon:Show(); row.head:Show(); row.sub:Show(); row.tag:Show()
-        local collapsed = ns.db.collapsed[ab.name] and not searching
-        row.toggle:SetTexture(collapsed and "Interface\\Buttons\\UI-PlusButton-Up" or "Interface\\Buttons\\UI-MinusButton-Up")
-        row.icon:SetTexture(ab.icon)
-        local complete = d.have == #ab.parsed
-        row.head:SetText(complete and (GREEN .. ab.name .. "|r") or ab.name)
-        local fams = ab.isAll and "all families" or ab.famText
-        row.sub:SetText(("|cffffffff%d/%d|r   %s"):format(d.have, #ab.parsed, fams))
-        if d.here > 0 then
-          row.tag:SetText(("%s%d tameable here|r"):format(GREEN, d.here))
-        elseif complete then
-          row.tag:SetText(GREEN .. "Complete|r")
-        elseif ab.src == "trainer" then
-          row.tag:SetText("|cff99ccffPet Trainer|r")
-        else
-          row.tag:SetText("")
-        end
-      else
-        local r = d.rank
-        row:SetHeight(ROW_H)
-        y = y + ROW_H
-        stripe = stripe + 1
-        row.bg:SetColorTexture(1, 1, 1, stripe % 2 == 0 and 0.04 or 0)
-        row.line:Hide()
-        row.toggle:Hide(); row.icon:Hide(); row.head:Hide(); row.sub:Hide(); row.tag:Hide()
-        for _, c in ipairs({ row.c1, row.c2, row.c3, row.c4, row.c5 }) do c:Show() end
-        row.box:Show()
-        row.check:SetShown(d.status ~= nil)
-        row.check:SetAlpha(d.status == "implied" and 0.45 or 1)
-        -- grey = you can't get it yet (no teacher you can tame at your level)
-        -- orange pet lvl = you can learn it now, your pet just can't use it yet
-        local canGet = d.ab.src == "trainer" or #r.teachers == 0
-        if not canGet then
-          for _, t in ipairs(r.teachers) do
-            if ns.CanTame(t) then canGet = true break end
+    -- Layout abilities and their rank grids
+    local y = 0
+    local cellIndex = 1
+
+    for abilityIndex, entry in ipairs(visibleAbilities) do
+      local ab = entry.ab
+      local ranks = entry.ranks
+      local collapsed = ns.db.collapsed[ab.name] and not searching
+
+      -- Create/reuse ability header row
+      local header = GetAbilityHeader(abilityIndex)
+      header:ClearAllPoints()
+      header:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+      header:SetPoint("RIGHT", child, "RIGHT")
+      header:Show()
+
+      header.data = { header = true, ab = ab }
+
+      -- Update header appearance
+      local complete = entry.have == #ab.parsed
+      header.name:SetText(complete and (GREEN .. ab.name .. "|r") or ab.name)
+      header.ranks:SetText(("|cffffffff%d/%d|r"):format(entry.have, #ab.parsed))
+
+      local fams = ab.isAll and "all families" or ab.famText
+      header.family:SetText(fams)
+
+      local toggleTex = collapsed and "Interface\\Buttons\\UI-PlusButton-Up" or "Interface\\Buttons\\UI-MinusButton-Up"
+      header.toggle:SetTexture(toggleTex)
+      header.icon:SetTexture(ab.icon)
+
+      y = y + 26
+
+      -- Layout rank grid if expanded
+      if not collapsed then
+        local grid = abilityRows[abilityIndex].grid
+        grid:ClearAllPoints()
+        grid:SetPoint("TOPLEFT", child, "TOPLEFT", 4, -y)
+        grid:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+        grid:Show()
+
+        -- Determine number of columns based on available width
+        local availWidth = grid:GetWidth() - 8
+        local cellSize = 60
+        local cellPadding = 6
+        local numCols = math.max(3, math.floor((availWidth + cellPadding) / (cellSize + cellPadding)))
+
+        -- Layout rank cells in a grid
+        for rankIdx, rankData in ipairs(ranks) do
+          local cell = GetRankCell(cellIndex)
+          cell.data = rankData
+
+          local col = (rankIdx - 1) % numCols
+          local row = math.floor((rankIdx - 1) / numCols)
+
+          cell:ClearAllPoints()
+          cell:SetPoint("TOPLEFT", grid, "TOPLEFT", col * (cellSize + cellPadding), -(row * (cellSize + cellPadding)))
+          cell:Show()
+
+          -- Set rank cell appearance
+          cell.icon:SetTexture(rankData.ab.icon)
+          cell.rankText:SetText("R" .. rankData.rank.rank)
+
+          -- Determine rank cell color
+          local canGet = rankData.ab.src == "trainer" or #rankData.rank.teachers == 0
+          if not canGet then
+            for _, t in ipairs(rankData.rank.teachers) do
+              if ns.CanTame(t) then canGet = true break end
+            end
           end
+
+          local r, g, b = GetRankColor(rankData.status, canGet)
+          cell.border:SetColorTexture(r / 255, g / 255, b / 255, 0.6)
+          cell.bg:SetColorTexture(r / 255, g / 255, b / 255, 0.1)
+
+          cellIndex = cellIndex + 1
         end
-        local color
-        if d.status == "known" then color = GREEN
-        elseif d.status == "implied" then color = "|cff5f9f5f"
-        elseif not canGet then color = "|cff808080"
-        else color = "|cffffffff" end
-        row.c1:SetText(color .. "Rank " .. r.rank .. "|r")
-        if not d.status and r.level > lvl then
-          row.c2:SetText("|cffff9040" .. r.level .. "|r")
-        else
-          row.c2:SetText(color .. r.level .. "|r")
-        end
-        row.c3:SetText(color .. r.tp .. "|r")
-        row.c4:SetText(ns.petHas[ns.Key(d.ab.name, r.rank)] and "|cff69ccf0On pet|r" or "")
-        row.c5:SetText(SourceText(d.ab, r, zone))
+
+        -- Calculate grid height
+        local numRows = math.ceil(#ranks / numCols)
+        local gridHeight = numRows * (cellSize + cellPadding) + cellPadding
+        grid:SetHeight(gridHeight)
+
+        y = y + gridHeight + 6
       end
     end
-    for i = #entries + 1, #rows do rows[i]:Hide(); rows[i].data = nil end
-    emptyText:SetShown(#entries == 0)
+
+    -- Hide unused rank cells
+    for i = cellIndex, #rankCells do
+      rankCells[i]:Hide()
+    end
+
+    -- Hide unused ability headers
+    for i = #visibleAbilities + 1, #abilityRows do
+      abilityRows[i].header:Hide()
+      abilityRows[i].grid:Hide()
+    end
+
+    emptyText:SetShown(#visibleAbilities == 0)
     child:SetHeight(math.max(1, y))
   end
+
   p:SetScript("OnShow", p.Refresh)
 end
 
 ------------------------------------------------------------------------
--- Tab 2: Hunt Planner
+-- Tab 2: Hunt Planner (Zone Cards with Beast Grid)
 ------------------------------------------------------------------------
 do
   local p = panels[2]
+
+  -- Terrain color mapping for zones
+  local ZONE_COLORS = {
+    -- Kalimdor
+    ["Barrens"] = { r = 0.75, g = 0.65, b = 0.35, a = 0.15 },
+    ["Dustwallow Marsh"] = { r = 0.5, g = 0.6, b = 0.3, a = 0.15 },
+    ["Tanaris"] = { r = 0.8, g = 0.75, b = 0.3, a = 0.15 },
+    ["Ashenvale"] = { r = 0.3, g = 0.6, b = 0.2, a = 0.15 },
+    ["Thousand Needles"] = { r = 0.7, g = 0.5, b = 0.4, a = 0.15 },
+    ["Desolace"] = { r = 0.6, g = 0.4, b = 0.3, a = 0.15 },
+    ["Stonetalon Mountains"] = { r = 0.5, g = 0.5, b = 0.5, a = 0.15 },
+    ["Azshara"] = { r = 0.3, g = 0.4, b = 0.6, a = 0.15 },
+    ["The Hinterlands"] = { r = 0.4, g = 0.5, b = 0.3, a = 0.15 },
+    ["Feralas"] = { r = 0.3, g = 0.6, b = 0.4, a = 0.15 },
+    ["Silithus"] = { r = 0.7, g = 0.4, b = 0.2, a = 0.15 },
+    ["Mulgore"] = { r = 0.7, g = 0.65, b = 0.35, a = 0.15 },
+    ["Durotar"] = { r = 0.75, g = 0.65, b = 0.35, a = 0.15 },
+    ["The Barrens"] = { r = 0.75, g = 0.65, b = 0.35, a = 0.15 },
+    -- Eastern Kingdoms
+    ["Westfall"] = { r = 0.5, g = 0.6, b = 0.3, a = 0.15 },
+    ["Loch Modan"] = { r = 0.4, g = 0.5, b = 0.6, a = 0.15 },
+    ["Redridge Mountains"] = { r = 0.5, g = 0.4, b = 0.3, a = 0.15 },
+    ["Duskwood"] = { r = 0.3, g = 0.3, b = 0.4, a = 0.15 },
+    ["Stranglethorn Vale"] = { r = 0.3, g = 0.6, b = 0.2, a = 0.15 },
+    ["Swamp of Sorrows"] = { r = 0.4, g = 0.5, b = 0.2, a = 0.15 },
+    ["Blighted Lands"] = { r = 0.4, g = 0.3, b = 0.5, a = 0.15 },
+    ["Plaguelands"] = { r = 0.4, g = 0.3, b = 0.5, a = 0.15 },
+    ["Eastern Plaguelands"] = { r = 0.4, g = 0.3, b = 0.5, a = 0.15 },
+    ["Western Plaguelands"] = { r = 0.4, g = 0.3, b = 0.5, a = 0.15 },
+    ["Stratholme"] = { r = 0.4, g = 0.3, b = 0.5, a = 0.15 },
+    ["Undercity"] = { r = 0.3, g = 0.2, b = 0.4, a = 0.15 },
+    ["Silverpine Forest"] = { r = 0.3, g = 0.4, b = 0.3, a = 0.15 },
+    ["Tirisfal Glades"] = { r = 0.3, g = 0.4, b = 0.3, a = 0.15 },
+    ["Hillsbrad Foothills"] = { r = 0.5, g = 0.4, b = 0.3, a = 0.15 },
+    ["Arathi Highlands"] = { r = 0.5, g = 0.4, b = 0.3, a = 0.15 },
+    ["Hinterlands"] = { r = 0.4, g = 0.5, b = 0.3, a = 0.15 },
+    ["Wetlands"] = { r = 0.3, g = 0.5, b = 0.3, a = 0.15 },
+    ["Burning Steppes"] = { r = 0.7, g = 0.4, b = 0.2, a = 0.15 },
+    ["Searing Gorge"] = { r = 0.7, g = 0.4, b = 0.2, a = 0.15 },
+    ["Blackrock Mountain"] = { r = 0.4, g = 0.3, b = 0.3, a = 0.15 },
+    ["Deadwind Pass"] = { r = 0.3, g = 0.2, b = 0.4, a = 0.15 },
+  }
+
+  local function GetZoneTerrainColor(zone)
+    local c = ZONE_COLORS[zone]
+    return c or { r = 0.5, g = 0.5, b = 0.5, a = 0.1 }
+  end
+
   local intro = Text(p, "GameFontHighlightSmall", 6, -4)
-  intro:SetWidth(WIDTH - 40)
+  intro:SetWidth(600)
   Check(p, "My pet's family only", "huntPetOnly", 2, -34, "Only count abilities your current pet's family can use.")
   Check(p, "Include dungeons", "huntDungeons", 160, -34, "Also count beasts that live inside dungeons.")
   Check(p, "Sort by most new ranks", "huntSortCount", 290, -34, "Show the zones with the most new ranks first, instead of lowest level first.")
@@ -847,44 +1050,205 @@ do
   Check(p, "Show my current zone first", "huntHereFirst", 2, -56,
     "If the zone you're in has something to tame, list it at the top.")
   local questieNote = Text(p, "GameFontHighlightSmall", 210, -61)
-  questieNote:SetWidth(WIDTH - 250)
+  questieNote:SetWidth(600)
   questieNote:SetWordWrap(false)
   Divider(p, -82)
-  local L = MakeList(p, -86, 4)
 
-  local function TeacherList(e)
-    local names = {}
-    for i, t in ipairs(e.teachers) do
-      if i > 3 then names[#names + 1] = ("|cff808080+%d more|r"):format(#e.teachers - 3) break end
-      names[#names + 1] = ("%s |cff9d9d9d(%s)|r%s"):format(t.name, t.level, Geo.Tag(t.name))
-    end
-    return table.concat(names, ", ")
+  -- Route preview at bottom
+  Text(p, "GameFontNormalSmall", 6, -86, "Current route:")
+  local routeText = Text(p, "GameFontDisableSmall", 6, -102)
+  routeText:SetWidth(650)
+  routeText:SetJustifyH("LEFT")
+
+  local clearRoute = Button(p, "Clear route", 110, function()
+    ns.db.huntRoute = {}
+    p.Refresh()
+  end)
+  clearRoute:SetPoint("TOPRIGHT", -8, -100)
+
+  -- Scroll container for zone cards
+  local scrollContainer = CreateFrame("ScrollFrame", nil, p)
+  scrollContainer:SetPoint("TOPLEFT", 2, -120)
+  scrollContainer:SetPoint("BOTTOMRIGHT", -2, 2)
+  scrollContainer:EnableMouseWheel(true)
+
+  local scrollChild = CreateFrame("Frame", nil, scrollContainer)
+  scrollChild:SetWidth(scrollContainer:GetWidth())
+  scrollContainer:SetScrollChild(scrollChild)
+
+  scrollContainer:SetScript("OnMouseWheel", function(self, delta)
+    self:SetVerticalScroll(self:GetVerticalScroll() - delta * 30)
+  end)
+
+  -- Zone cards cache
+  local cards = {}
+
+  local function MakeBeastIcon(parent, entry, x, y)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(60, 60)
+    btn:SetPoint("TOPLEFT", x, y)
+
+    -- Icon texture
+    local icon = btn:CreateTexture(nil, "ARTWORK")
+    icon:SetAllPoints(btn)
+    icon:SetTexture(entry.ab.icon)
+    icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+    -- Rarity border - determine from ability source
+    local rarity = entry.ab.src == "trainer" and "rare" or "common"
+    local borderColor = { common = {0.9, 0.9, 0.9, 1}, rare = {0.5, 0.75, 1, 1}, elite = {0.8, 0.5, 1, 1} }
+    local bc = borderColor[rarity] or borderColor.common
+
+    local border = btn:CreateTexture(nil, "OVERLAY")
+    border:SetAllPoints(btn)
+    border:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+    border:SetVertexColor(bc[1], bc[2], bc[3], bc[4])
+
+    -- Tooltip
+    btn:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_TOP")
+      GameTooltip:AddLine(entry.ab.name .. " Rank " .. entry.rank.rank, 1, 0.82, 0)
+      GameTooltip:AddLine(entry.rank.effect, 1, 1, 1, true)
+      GameTooltip:AddLine(" ")
+      local teachers = {}
+      for i, t in ipairs(entry.teachers) do
+        if i > 2 then
+          teachers[#teachers + 1] = ("|cff9d9d9d+%d more|r"):format(#entry.teachers - 2)
+          break
+        end
+        teachers[#teachers + 1] = t.name
+      end
+      GameTooltip:AddLine("Teachers: " .. table.concat(teachers, ", "), 0.8, 0.8, 0.8)
+      GameTooltip:Show()
+    end)
+
+    btn:SetScript("OnLeave", GameTooltip_Hide)
+
+    -- Right-click waypoint
+    btn:SetScript("OnClick", function(self, button)
+      if button == "RightButton" then
+        local list = {}
+        for _, t in ipairs(entry.teachers) do
+          list[#list + 1] = { t = t, label = Geo.Label(entry.ab, entry.rank, t) }
+        end
+        Geo.WaypointMany(list)
+      end
+    end)
+
+    return btn
   end
 
-  local function WaypointItems(entries)
-    local list = {}
-    for _, e in ipairs(entries) do
-      for _, t in ipairs(e.teachers) do
-        if #list >= 15 then return list end
-        list[#list + 1] = { t = t, label = Geo.Label(e.ab, e.rank, t) }
-      end
+  local function MakeZoneCard(zoneData, index, parent)
+    local card = CreateFrame("Frame", nil, parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    card:SetSize(200, 150)
+    card:SetPoint("TOPLEFT", 10 + (index - 1) * 220, 0)
+
+    if card.SetBackdrop then
+      card:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 10,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+      })
+      card:SetBackdropColor(0.1, 0.1, 0.1, 0.4)
+      card:SetBackdropBorderColor(0.5, 0.4, 0.2, 0.6)
     end
-    return list
+
+    -- Terrain color background
+    local terrainBg = card:CreateTexture(nil, "BACKGROUND")
+    terrainBg:SetAllPoints(card)
+    local tc = GetZoneTerrainColor(zoneData.zone)
+    terrainBg:SetColorTexture(tc.r, tc.g, tc.b, tc.a)
+
+    -- Zone name (title)
+    local zoneName = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    zoneName:SetPoint("TOPLEFT", 6, -6)
+    zoneName:SetWidth(188)
+    zoneName:SetJustifyH("LEFT")
+    zoneName:SetText(("|cffffd700%s|r"):format(zoneData.zone))
+
+    -- Level range (color coded)
+    local lvl = ns.PlayerLevel()
+    local rc = (zoneData.maxLevel < lvl) and "|cff9d9d9d" or ((zoneData.minLevel > lvl) and "|cffff9040" or GREEN)
+    local levelText = card:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    levelText:SetPoint("TOPLEFT", 6, -22)
+    levelText:SetText(("%s%d-%d|r"):format(rc, zoneData.minLevel, zoneData.maxLevel))
+
+    -- Beast count
+    local countText = card:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    countText:SetPoint("TOPRIGHT", -6, -22)
+    countText:SetText(("|cff40ff40%d rank%s|r"):format(#zoneData.entries, #zoneData.entries == 1 and "" or "s"))
+
+    -- You are here indicator
+    if zoneData.here then
+      local hereText = card:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+      hereText:SetPoint("BOTTOMRIGHT", -6, 6)
+      hereText:SetText("|cff40ff40(You're here)|r")
+    end
+
+    -- Beast icon grid (4 icons max, arranged in 2x2)
+    local gridY = -38
+    for i = 1, math.min(4, #zoneData.entries) do
+      local row = math.floor((i - 1) / 2)
+      local col = (i - 1) % 2
+      local x = 6 + col * 92
+      local y = gridY - row * 60
+      MakeBeastIcon(card, zoneData.entries[i], x, y)
+    end
+
+    -- Waypoint button for all beasts
+    local waypointBtn = CreateFrame("Button", nil, card, "UIPanelButtonTemplate")
+    waypointBtn:SetSize(70, 20)
+    waypointBtn:SetPoint("BOTTOMLEFT", 6, 4)
+    waypointBtn:SetText("Route")
+    waypointBtn:SetScript("OnClick", function()
+      local list = {}
+      for _, e in ipairs(zoneData.entries) do
+        for _, t in ipairs(e.teachers) do
+          if #list < 15 then
+            list[#list + 1] = { t = t, label = Geo.Label(e.ab, e.rank, t) }
+          end
+        end
+      end
+      Geo.WaypointMany(list)
+      -- Add to route
+      if not ns.db.huntRoute then ns.db.huntRoute = {} end
+      ns.db.huntRoute[zoneData.zone] = zoneData
+    end)
+
+    -- Enable mouse for tooltip
+    card:EnableMouse(true)
+
+    card:SetScript("OnMouseDown", function(self)
+      -- Show details tooltip
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:AddLine(zoneData.zone, 1, 0.82, 0)
+      GameTooltip:AddLine(("Level %d-%d"):format(zoneData.minLevel, zoneData.maxLevel), 0.8, 0.8, 0.8)
+      GameTooltip:AddLine(" ")
+      for _, e in ipairs(zoneData.entries) do
+        GameTooltip:AddLine(("%s Rank %d"):format(e.ab.name, e.rank.rank), 1, 1, 1)
+      end
+      GameTooltip:AddLine(" ")
+      GameTooltip:AddLine("Right-click beasts for waypoints", 0.5, 0.5, 0.5)
+      GameTooltip:Show()
+    end)
+
+    card:SetScript("OnLeave", GameTooltip_Hide)
+
+    return card
   end
 
   function p.Refresh()
     if not p:IsShown() then return end
     local o = ns.db.opts
-    intro:SetText(("Zones with ranks you can tame at |cffffffffyour level (%d)|r, %s. " ..
-      "Only the highest missing rank of each ability is counted - it covers the lower ones."):format(ns.PlayerLevel(),
-      o.huntSortCount and "most new ranks first" or "lowest level first"))
+    intro:SetText(("Zone cards with ranks you can tame at |cffffffffyour level (%d)|r. " ..
+      "Click beasts for waypoints. Shift-drag cards to reorder your hunt route."):format(ns.PlayerLevel()))
+
     local plan = ns.HuntPlan(o.huntPetOnly, o.huntDungeons, o.huntSortCount and "count" or "level")
-    local items = {}
-    local lvl = ns.PlayerLevel()
+
     questieNote:SetText(Geo.HasQuestie() and ""
       or "|cffff9040Questie not installed: routes only include beasts you've spotted yourself.|r")
 
-    -- the zone you're standing in goes first
     if o.huntHereFirst then
       for i, z in ipairs(plan) do
         if z.here then
@@ -895,50 +1259,33 @@ do
       end
     end
 
-    for _, z in ipairs(plan) do
-      local n = #z.entries
-      -- level range: grey = outlevelled, green = your level, orange = above you
-      local rc = (z.maxLevel < lvl) and "|cff9d9d9d" or ((z.minLevel > lvl) and "|cffff9040" or GREEN)
-      local range = z.minLevel > 0 and ("  %s(%d-%d)|r"):format(rc, z.minLevel, z.maxLevel) or ""
-      if ns.ZoneHostile(z.zone) then range = range .. ("  |cffff4040%s|r"):format(ns.ZoneFaction(z.zone)) end
-      items[#items + 1] = {
-        kind = "head",
-        left = ("%s%s|r%s"):format(z.here and GREEN or "|cffffffff", z.zone, range),
-        right = ("%s%d new rank%s|r%s"):format(GREEN, n, n == 1 and "" or "s", z.here and "  |cff40ff40(you're here)|r" or ""),
-        button = { text = "Waypoints", onClick = function() Geo.WaypointMany(WaypointItems(z.entries)) end },
-        tip = function(tt)
-          tt:AddLine(z.zone, 1, 0.82, 0)
-          if z.minLevel > 0 then tt:AddLine(("Recommended level %d-%d"):format(z.minLevel, z.maxLevel), 0.8, 0.8, 0.8) end
-          for _, e in ipairs(z.entries) do tt:AddLine(("%s %d"):format(e.ab.name, e.rank.rank), 1, 1, 1) end
-          tt:AddLine(" ")
-          tt:AddLine("Waypoints: mark these beasts (TomTom arrows if installed)", 0.5, 0.5, 0.5)
-        end,
-      }
-      for _, e in ipairs(z.entries) do
-        items[#items + 1] = {
-          kind = "row", icon = e.ab.icon, indent = 24,
-          left = ("|cffffffff%s %d|r   %s"):format(e.ab.name, e.rank.rank, TeacherList(e)),
-          right = ("|cff9d9d9dpet lvl %d|r"):format(e.rank.level),
-          onClick = function()
-            local list = {}
-            for _, t in ipairs(e.teachers) do list[#list + 1] = { t = t, label = Geo.Label(e.ab, e.rank, t) } end
-            Geo.WaypointMany(list)
-          end,
-          tip = function(tt)
-            tt:AddLine(("%s (Rank %d)"):format(e.ab.name, e.rank.rank), 1, 0.82, 0)
-            tt:AddLine(e.rank.effect, 1, 1, 1, true)
-            tt:AddLine(" ")
-            for _, t in ipairs(e.teachers) do
-              tt:AddDoubleLine(t.name .. Geo.Tag(t.name), ("%s %s"):format(t.family, t.level), 1, 1, 1, 0.7, 0.7, 0.7)
-            end
-            tt:AddLine(" ")
-            tt:AddLine("Click: waypoints to these beasts", 0.5, 0.5, 0.5)
-          end,
-        }
-      end
+    -- Clear old cards
+    for i, card in ipairs(cards) do
+      card:Hide()
     end
-    ListSet(L, items, "Nothing left to tame at your level - nice!")
+    cards = {}
+
+    -- Create new zone cards
+    for i, zoneData in ipairs(plan) do
+      cards[i] = MakeZoneCard(zoneData, i, scrollChild)
+    end
+
+    -- Update scroll child height
+    local rows = math.ceil(#plan / 2)
+    scrollChild:SetHeight(math.max(160, rows * 160))
+
+    -- Update route preview text
+    if ns.db.huntRoute and ns.db.huntRoute ~= {} then
+      local routeStr = {}
+      for zone, _ in pairs(ns.db.huntRoute) do
+        table.insert(routeStr, zone)
+      end
+      routeText:SetText("Route: " .. table.concat(routeStr, " > "))
+    else
+      routeText:SetText("(No route planned yet)")
+    end
   end
+
   p:SetScript("OnShow", p.Refresh)
 end
 
@@ -948,7 +1295,7 @@ end
 do
   local p = panels[ns.TAB.rares]
   local intro = Text(p, "GameFontHighlightSmall", 6, -4)
-  intro:SetWidth(WIDTH - 40)
+  intro:SetWidth(600)
   Check(p, "Rares", "spShowRare", 2, -30, "Show rare pets.")
   Check(p, "Elites", "spShowElite", 72, -30, "Show elite pets (tough in the wild, normal once tamed).")
   Check(p, "Quest spawns", "spShowSpawned", 142, -30, "Show pets that only appear through a quest or trigger.")
@@ -976,7 +1323,6 @@ do
   hint:SetPoint("LEFT", search, "RIGHT", 10, 0)
   hint:SetText("name, family or zone")
 
-  -- columns (x is relative to the row)
   local COLS = {
     { x = 52, w = 132, head = "Name" },
     { x = 186, w = 72, head = "Type" },
@@ -1009,13 +1355,10 @@ do
     return s
   end
 
-  ----------------------------------------------------------------------
-  -- Drawer: slides out beside the window with a 3D model and details
-  ----------------------------------------------------------------------
   local DW = 270
   local drawer = CreateFrame("Frame", "BeastTrainingTrackerPetDrawer", f, BackdropTemplateMixin and "BackdropTemplate" or nil)
-  drawer:SetSize(DW, HEIGHT - 40)
-  drawer:SetFrameLevel(math.max(0, f:GetFrameLevel() - 1)) -- slides out from behind the window
+  drawer:SetSize(DW, 500)
+  drawer:SetFrameLevel(math.max(0, f:GetFrameLevel() - 1))
   drawer:EnableMouse(true)
   drawer:Hide()
   if drawer.SetBackdrop then
@@ -1039,7 +1382,6 @@ do
   dSub:SetPoint("RIGHT", -14, 0)
   dSub:SetJustifyH("LEFT")
 
-  -- 3D model: drag to turn, wheel to zoom, slowly spins until you touch it
   local model = CreateFrame("PlayerModel", nil, drawer)
   model:SetPoint("TOPLEFT", 10, -56)
   model:SetPoint("TOPRIGHT", -10, -56)
@@ -1076,7 +1418,6 @@ do
     end
   end)
 
-  -- NPC id: our rare list first, then Questie
   local function NpcId(name)
     if ns.rareIds and ns.rareIds[name] then return ns.rareIds[name] end
     if Geo.HasQuestie() then
@@ -1099,7 +1440,6 @@ do
     model:SetCreature(id)
     if model.SetCamDistanceScale then model:SetCamDistanceScale(zoom) end
     model:SetFacing(facing)
-    -- the creature may not be in your game cache yet; try again shortly
     if C_Timer then
       C_Timer.After(0.5, function()
         if drawer:IsShown() and drawer.name == name then model:SetCreature(id); model:SetFacing(facing) end
@@ -1114,7 +1454,7 @@ do
   dInfo:SetJustifyV("TOP")
   dInfo:SetSpacing(3)
 
-  local current -- the rare shown in the drawer
+  local current
   local dWaypoint = Button(drawer, "Waypoint", 110, function()
     if not current then return end
     local e = current.teaches[1]
@@ -1126,7 +1466,6 @@ do
   end)
   dTamed:SetPoint("BOTTOMRIGHT", -14, 14)
 
-  -- 1800 -> "30m", 37800 -> "10.5h", 129600 -> "36h", 259200 -> "3d"
   local function Dur(sec)
     if sec < 3600 then return math.floor(sec / 60 + 0.5) .. "m" end
     if sec <= 72 * 3600 then
@@ -1146,7 +1485,6 @@ do
     return "Respawn: |cffffffff" .. range .. "|r" .. spots
   end
 
-  -- Family abilities this beast could learn (skipping the ones every family gets)
   local function FamilyAbilities(family)
     local list = {}
     for _, ab in ipairs(abilities) do
@@ -1194,7 +1532,6 @@ do
     dTamed:SetText(r.tamed and "Mark not tamed" or "Mark tamed")
   end
 
-  -- Slide out from behind the window, on whichever side has room
   local slideT
   local function Anchor(offset)
     drawer:ClearAllPoints()
@@ -1208,12 +1545,12 @@ do
   drawer:SetScript("OnUpdate", function()
     if not slideT then return end
     local t = math.min(1, (GetTime() - slideT) / 0.18)
-    Anchor(DW * (1 - (1 - t) ^ 2)) -- ease out
+    Anchor(DW * (1 - (1 - t) ^ 2))
     if t >= 1 then slideT = nil end
   end)
 
   local function OpenDrawer(r)
-    if drawer:IsShown() and drawer.name == r.name then drawer:Hide() return end -- click again: close
+    if drawer:IsShown() and drawer.name == r.name then drawer:Hide() return end
     local wasOpen = drawer:IsShown()
     drawer.name = r.name
     FillDrawer(r)
@@ -1244,7 +1581,6 @@ do
       local tameable = ns.CanTame(r.t)
       local sp = r.t
       local typeOk = (o.spShowRare and sp.rare) or (o.spShowElite and sp.elite) or (o.spShowSpawned and sp.spawned)
-      -- Search filter: match name, family, or zone
       local matches = not searching or r.name:lower():find(s, 1, true) or sp.family:lower():find(s, 1, true) or sp.zone:lower():find(s, 1, true)
       if typeOk and (o.spShowDungeon or not sp.dungeon)
         and not (o.rareHideTamed and r.tamed) and not (o.rareHideHigh and not tameable) and matches then
@@ -1324,79 +1660,156 @@ do
 end
 
 ------------------------------------------------------------------------
--- Tab 4: My Pet
+-- Tab 4: My Pet (Card-based redesign)
 ------------------------------------------------------------------------
 do
   local p = panels[ns.TAB.pet]
-  local summary = Text(p, "GameFontNormal", 6, -6)
-  local tpText = Text(p, "GameFontHighlightSmall", 6, -26)
-  local hint = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  hint:SetPoint("TOPRIGHT", -6, -10)
-  hint:SetJustifyH("RIGHT")
-  hint:SetText("Use the |cffffffffBeast Training|r button (top right) to teach")
-  Check(p, "Remind me about upgrades", "upgradeAlert", 2, -44, "Chat reminder when you know a better rank than your pet has.")
-  Check(p, "Pet level-up nudges", "levelNudge", 200, -44, "Chat message when your pet reaches the level for a new rank.")
-  Divider(p, -70)
-  local L = MakeList(p, -74, 4)
+
+  local scroll, child = Scroll(p, -6, 4)
+  local emptyText = child:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+  emptyText:SetPoint("TOP", 0, -40)
+
+  local function CreateCard(parent, title, subtitle)
+    local card = CreateFrame("Frame", nil, parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    card:SetBackdrop({
+      bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 10,
+      insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    card:SetBackdropColor(0.95, 0.92, 0.82, 0.3)
+    card:SetBackdropBorderColor(0.70, 0.62, 0.45, 0.6)
+
+    if title then
+      local titleFs = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+      titleFs:SetPoint("TOPLEFT", 10, -8)
+      titleFs:SetText(title)
+      titleFs:SetTextColor(1, 0.82, 0)
+      card.title = titleFs
+    end
+
+    if subtitle then
+      local subFs = card:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      subFs:SetPoint("TOPLEFT", 10, -26)
+      subFs:SetText(subtitle)
+      subFs:SetTextColor(0.9, 0.9, 0.9)
+      card.subtitle = subFs
+    end
+
+    return card
+  end
 
   function p.Refresh()
     if not p:IsShown() then return end
+    local y = 0
+
     if not UnitExists("pet") then
-      summary:SetText("|cff9d9d9dSummon your pet to see upgrades for it.|r")
-      tpText:SetText("")
-      ListSet(L, {}, "No pet out")
+      emptyText:SetText("|cff9d9d9dSummon your pet to see upgrades for it.|r")
+      emptyText:Show()
+      child:SetHeight(1)
       return
     end
+    emptyText:Hide()
+
     ns.ScanPet()
     local fam, plvl = ns.PetFamily() or "?", ns.PetLevel()
-    summary:SetText(("%s  |cffffffff%s, level %d|r"):format(UnitName("pet") or "Pet", fam, plvl))
+    local petName = UnitName("pet") or "Pet"
+
+    -- Pet Status Card
+    local statusCard = CreateCard(child, petName .. "  |cffffffff" .. fam .. "|r, Level " .. plvl)
+    statusCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+    statusCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+    statusCard:SetHeight(60)
+
     if GetPetTrainingPoints then
       local total, spent = GetPetTrainingPoints()
       if total then
+        local tpText = statusCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        tpText:SetPoint("TOPLEFT", 10, -44)
         tpText:SetText(("Training points: |cffffffff%d free|r of %d"):format((total or 0) - (spent or 0), total or 0))
-      else
-        tpText:SetText("")
       end
-    else
-      tpText:SetText("")
     end
+    y = y + 70
 
-    local items = {}
-    -- Upgrades
+    -- Upgrades Section
     local ups = ns.Upgrades()
-    items[#items + 1] = { kind = "head", left = "Upgrades", right = #ups > 0 and (GREEN .. #ups .. " available|r") or "|cff9d9d9dnone|r" }
-    if #ups == 0 then
-      items[#items + 1] = { kind = "note", left = "Your pet already has the best rank you know of everything it uses.", indent = 24 }
-    end
+    local readyUps, levelUps = {}, {}
     for _, u in ipairs(ups) do
-      items[#items + 1] = {
-        kind = "row", icon = u.ab.icon, indent = 24,
-        left = ("|cffffffff%s|r   pet has %d  ->  you know %d"):format(u.ab.name, u.from, u.to),
-        right = u.needLevel and ("|cff808080pet needs lvl %d|r"):format(u.needLevel) or (GREEN .. "teach it now|r"),
-      }
+      if u.needLevel then
+        levelUps[#levelUps + 1] = u
+      else
+        readyUps[#readyUps + 1] = u
+      end
     end
 
-    -- Coming up
+    if #readyUps > 0 then
+      local readyCard = CreateCard(child, "|cff40ff40Ready Now|r (" .. #readyUps .. ")")
+      readyCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+      readyCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+      local contentY = -40
+      for _, u in ipairs(readyUps) do
+        local row = readyCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row:SetPoint("TOPLEFT", 10, contentY)
+        row:SetWidth(500)
+        row:SetJustifyH("LEFT")
+        row:SetWordWrap(true)
+        row:SetText("|cffffffff" .. u.ab.name .. "|r: pet has rank " .. u.from .. " → you know rank " .. u.to)
+        contentY = contentY - 18
+      end
+      readyCard:SetHeight(math.abs(contentY) + 10)
+      y = y + math.abs(contentY) + 20
+    end
+
+    if #levelUps > 0 then
+      local levelCard = CreateCard(child, "|cffff9040Needs Level|r (" .. #levelUps .. ")")
+      levelCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+      levelCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+      local contentY = -40
+      for _, u in ipairs(levelUps) do
+        local row = levelCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row:SetPoint("TOPLEFT", 10, contentY)
+        row:SetWidth(500)
+        row:SetJustifyH("LEFT")
+        row:SetWordWrap(true)
+        row:SetText("|cffffffff" .. u.ab.name .. "|r: pet needs level " .. u.needLevel)
+        contentY = contentY - 18
+      end
+      levelCard:SetHeight(math.abs(contentY) + 10)
+      y = y + math.abs(contentY) + 20
+    end
+
+    if #readyUps == 0 and #levelUps == 0 then
+      local noUpsCard = CreateCard(child, "|cff9d9d9dNo Upgrades")
+      noUpsCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+      noUpsCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+      noUpsCard:SetHeight(50)
+      local msg = noUpsCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      msg:SetPoint("TOPLEFT", 10, -30)
+      msg:SetText("Your pet already has the best ranks you know.")
+      y = y + 60
+    end
+
+    -- Coming Up Timeline
     local soon = ns.ComingUp(6)
-    items[#items + 1] = { kind = "head", left = "Coming up (next 6 pet levels)", right = "" }
-    if #soon == 0 then
-      items[#items + 1] = { kind = "note", left = "No new ranks for your pet's abilities in the next 6 levels.", indent = 24 }
-    end
-    for _, s in ipairs(soon) do
-      items[#items + 1] = {
-        kind = "row", icon = s.ab.icon, indent = 24,
-        left = ("|cffffd100Lvl %d|r   |cffffffff%s %d|r"):format(s.rank.level, s.ab.name, s.rank.rank),
-        right = s.known and (GREEN .. "already learned|r") or ("|cff9d9d9d" .. ns.TeacherZones(s.ab, s.rank, 2) .. "|r"),
-        tip = not s.known and function(tt)
-          tt:AddLine(("%s (Rank %d)"):format(s.ab.name, s.rank.rank), 1, 0.82, 0)
-          for _, t in ipairs(s.rank.teachers) do
-            tt:AddDoubleLine(t.name .. Geo.Tag(t.name), t.zone, 1, 1, 1, 0.7, 0.7, 0.7)
-          end
-        end or nil,
-      }
+    if #soon > 0 then
+      local comingCard = CreateCard(child, "Coming Up (Next 6 Levels)", nil)
+      comingCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+      comingCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+      local contentY = -40
+      for _, s in ipairs(soon) do
+        local row = comingCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row:SetPoint("TOPLEFT", 10, contentY)
+        row:SetWidth(500)
+        row:SetJustifyH("LEFT")
+        row:SetWordWrap(true)
+        local status = s.known and ("|cff40ff40known|r") or ("|cff9d9d9d" .. ns.TeacherZones(s.ab, s.rank, 2) .. "|r")
+        row:SetText("|cffffd100Lvl " .. s.rank.level .. "|r: |cffffffff" .. s.ab.name .. " " .. s.rank.rank .. "|r  " .. status)
+        contentY = contentY - 18
+      end
+      comingCard:SetHeight(math.abs(contentY) + 10)
+      y = y + math.abs(contentY) + 20
     end
 
-    -- Known abilities the pet could use but doesn't have
+    -- Extra Abilities Section
     local fam2 = ns.PetFamily()
     local extra = {}
     for _, ab in ipairs(abilities) do
@@ -1405,213 +1818,338 @@ do
         if best > 0 then extra[#extra + 1] = { ab = ab, rank = best } end
       end
     end
-    items[#items + 1] = { kind = "head", left = "You know these, your pet doesn't have them", right = "" }
-    if #extra == 0 then
-      items[#items + 1] = { kind = "note", left = "Nothing else you've learned fits this pet right now.", indent = 24 }
+
+    if #extra > 0 then
+      local extraCard = CreateCard(child, "Learn These Next", nil)
+      extraCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+      extraCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+      local contentY = -40
+      for _, x in ipairs(extra) do
+        local r = x.ab.parsed[x.rank]
+        local row = extraCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row:SetPoint("TOPLEFT", 10, contentY)
+        row:SetWidth(500)
+        row:SetJustifyH("LEFT")
+        row:SetWordWrap(true)
+        local cost = r and ("|cff9d9d9d" .. r.tp .. " TP|r") or ""
+        row:SetText("|cffffffff" .. x.ab.name .. " " .. x.rank .. "|r  " .. cost)
+        contentY = contentY - 18
+      end
+      extraCard:SetHeight(math.abs(contentY) + 10)
+      y = y + math.abs(contentY) + 20
     end
-    for _, x in ipairs(extra) do
-      local r = x.ab.parsed[x.rank]
-      items[#items + 1] = {
-        kind = "row", icon = x.ab.icon, indent = 24,
-        left = ("|cffffffff%s %d|r"):format(x.ab.name, x.rank),
-        right = r and ("|cff9d9d9d%d TP|r"):format(r.tp) or "",
-      }
-    end
-    ListSet(L, items)
+
+    child:SetHeight(math.max(1, y))
   end
   p:SetScript("OnShow", p.Refresh)
 end
 
 ------------------------------------------------------------------------
--- Tab 5: Settings (optional addons, map, alerts, tracker, minimap)
+-- Tab 5: Settings (Card-based redesign)
 ------------------------------------------------------------------------
 local mmCheck
 do
   local p = panels[ns.TAB.map]
-  local y = -2
-  local function Section(text)
-    local fs = Text(p, "GameFontNormal", 6, y, text)
-    Divider(p, y - 16)
-    y = y - 22
-    return fs
+
+  local scroll, child = Scroll(p, -6, 4)
+
+  local function CreateSettingsCard(parent, title)
+    local card = CreateFrame("Frame", nil, parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    card:SetBackdrop({
+      bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 10,
+      insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    card:SetBackdropColor(0.95, 0.92, 0.82, 0.3)
+    card:SetBackdropBorderColor(0.70, 0.62, 0.45, 0.6)
+    card:EnableMouse(true)
+
+    local titleFs = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    titleFs:SetPoint("TOPLEFT", 10, -8)
+    titleFs:SetText(title)
+    titleFs:SetTextColor(1, 0.82, 0)
+
+    local toggle = card:CreateTexture(nil, "ARTWORK")
+    toggle:SetSize(14, 14)
+    toggle:SetPoint("TOPRIGHT", -8, -8)
+    toggle:SetTexture("Interface\\Buttons\\UI-MinusButton-Up")
+
+    card.title = titleFs
+    card.toggle = toggle
+    card.isExpanded = true
+
+    return card
   end
 
-  -- Optional addons: green = detected, grey = not installed
-  Section("Optional addons  |cff9d9d9d- Beast Training Tracker works on its own; these add extras|r")
-  local addonRows = {}
-  for i = 1, 3 do
-    local r = {}
-    r.dot = p:CreateTexture(nil, "ARTWORK")
-    r.dot:SetSize(12, 12)
-    r.dot:SetPoint("TOPLEFT", 10, y - 2)
-    r.name = Text(p, "GameFontHighlight", 28, y)
-    r.text = Text(p, "GameFontHighlightSmall", 130, y - 1)
-    r.text:SetWidth(WIDTH - 180)
-    r.text:SetWordWrap(false)
-    addonRows[i] = r
-    y = y - 18
+  local function CreateCheckRow(card, label, key, tip, onChange)
+    local cb = Check(card, label, key, 10, 0, tip, onChange)
+    cb:SetParent(card)
+    return cb
   end
-  y = y - 8
-
-  Section("Map pins")
-  Check(p, "Show teachers on the world map", "mapPins", 4, y, "Pins for every beast that teaches a missing rank you can tame now. Click a pin for a waypoint.")
-  Check(p, "Show teachers on the minimap", "minimapPins", 300, y, "Pins on the minimap for the nearest teachers in your zone.")
-  y = y - 24
-  Check(p, "Hide ALL beast pins", "pinsOff", 4, y, "Master switch for every pin this addon draws. Same as right-clicking the minimap button.",
-    function() Geo.QueuePins(true) end)
-  Check(p, "Show untamed special pets on the map", "rarePins", 300, y, "Pins for untamed rares (and outdoor elites / quest spawns) you can tame, even if they teach nothing you need.")
-  y = y - 24
-  Check(p, "Open the map on the first waypoint", "routeOpenMap", 4, y, "When you set waypoints, open the world map on the first stop (not in combat).")
-  Check(p, "Draw the hunt route on the world map", "routeLines", 300, y, "Numbered stops joined by a dotted line, nearest first. Pick the color and opacity below.", function() ns.Geo.DrawRoute() end)
-  y = y - 36
-
-  -- Route line color + opacity
-  local colorLabel = Text(p, "GameFontHighlightSmall", 10, y - 5, "Route line color")
-  local swatch = CreateFrame("Button", nil, p, BackdropTemplateMixin and "BackdropTemplate" or nil)
-  swatch:SetSize(48, 20)
-  swatch:SetPoint("LEFT", colorLabel, "RIGHT", 12, 0)
-  if swatch.SetBackdrop then
-    swatch:SetBackdrop({ edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 8 })
-    swatch:SetBackdropBorderColor(0.8, 0.8, 0.8, 1)
-  end
-  swatch.color = swatch:CreateTexture(nil, "ARTWORK")
-  swatch.color:SetPoint("TOPLEFT", 3, -3)
-  swatch.color:SetPoint("BOTTOMRIGHT", -3, 3)
-
-  local function SetRouteColor(r, g, b)
-    ns.db.opts.routeColor = { r = r, g = g, b = b }
-    swatch.color:SetColorTexture(r, g, b, 1)
-    ns.Geo.DrawRoute()
-  end
-
-  swatch:SetScript("OnClick", function()
-    local r, g, b = ns.Geo.RouteColor()
-    local function apply() SetRouteColor(ColorPickerFrame:GetColorRGB()) end
-    local function cancel() SetRouteColor(r, g, b) end
-    if ColorPickerFrame.SetupColorPickerAndShow then
-      ColorPickerFrame:SetupColorPickerAndShow({ r = r, g = g, b = b, hasOpacity = false, swatchFunc = apply, cancelFunc = cancel })
-    else
-      ColorPickerFrame.hasOpacity = false
-      ColorPickerFrame.opacityFunc = nil
-      ColorPickerFrame.previousValues = { r, g, b }
-      ColorPickerFrame.func = apply
-      ColorPickerFrame.cancelFunc = cancel
-      ColorPickerFrame:SetColorRGB(r, g, b)
-      ColorPickerFrame:Hide()
-      ColorPickerFrame:Show()
-    end
-  end)
-  swatch:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    GameTooltip:AddLine("Route line color", 1, 0.82, 0)
-    GameTooltip:AddLine("Click to pick the color of the dotted hunt route on the world map.", 1, 1, 1, true)
-    GameTooltip:Show()
-  end)
-  swatch:SetScript("OnLeave", GameTooltip_Hide)
-
-  local alpha = CreateFrame("Slider", "BeastTrainingTrackerRouteAlpha", p, "OptionsSliderTemplate")
-  alpha:SetWidth(160)
-  alpha:SetPoint("LEFT", swatch, "RIGHT", 90, 0)
-  alpha:SetMinMaxValues(0.1, 1)
-  alpha:SetValueStep(0.05)
-  if alpha.SetObeyStepOnDrag then alpha:SetObeyStepOnDrag(true) end
-  local low = alpha.Low or _G["BeastTrainingTrackerRouteAlphaLow"]
-  local high = alpha.High or _G["BeastTrainingTrackerRouteAlphaHigh"]
-  local label = alpha.Text or _G["BeastTrainingTrackerRouteAlphaText"]
-  if low then low:SetText("10%") end
-  if high then high:SetText("100%") end
-  alpha:SetScript("OnValueChanged", function(self, v)
-    v = math.floor(v * 20 + 0.5) / 20
-    if label then label:SetText(("Opacity: %d%%"):format(v * 100)) end
-    if ns.db and ns.db.opts.routeAlpha ~= v then
-      ns.db.opts.routeAlpha = v
-      ns.Geo.DrawRoute()
-    end
-  end)
-
-  local resetColor = Button(p, "Default", 80, function()
-    local d = ns.Geo.ROUTE_DEFAULT
-    ns.db.opts.routeAlpha = d.a
-    alpha:SetValue(d.a)
-    SetRouteColor(d.r, d.g, d.b)
-  end)
-  resetColor:SetPoint("LEFT", alpha, "RIGHT", 40, 0)
-
-  -- current values, filled in whenever Settings refreshes
-  local function ShowRouteColor()
-    local r, g, b, a = ns.Geo.RouteColor()
-    swatch.color:SetColorTexture(r, g, b, 1)
-    alpha:SetValue(a)
-  end
-  y = y - 40
-
-  Section("Alerts")
-  Check(p, "Alert when I target or mouse over a teacher", "alertTarget", 4, y, "Big on-screen message when a beast you can tame teaches something you need.")
-  Check(p, "Alert when a teacher's nameplate appears", "alertNameplate", 300, y, "Same alert as soon as a teacher's nameplate shows up nearby (needs enemy nameplates on).")
-  y = y - 24
-  Check(p, "Play a sound with alerts", "alertSound", 4, y, "Raid-warning sound when an alert fires.")
-  Check(p, "Remind me about pet upgrades", "upgradeAlert", 300, y, "Chat reminder when you know a better rank than your pet has.")
-  y = y - 24
-  Check(p, "Pet level-up nudges", "levelNudge", 4, y, "Chat message when your pet reaches the level for a new rank.")
-  Check(p, "Let RareScanner alert for rares", "rsHandlesRares", 300, y,
-    "If RareScanner is installed it already alerts for rares on its list. With this on, Beast Training Tracker skips its own alert for those so you don't get two.")
-  y = y - 24
-  Check(p, "Popup when I learn a new ability", "learnToast", 4, y,
-    "On-screen popup (with sound) whenever a new pet ability rank is learned - e.g. from a beast you just tamed.")
-  Check(p, "Show a pet XP bar", "petXpBar", 300, y,
-    "Thin bar with your pet's experience, under your pet's frame. Mouse over it for numbers. Drag to move it, right-click it for options.")
-  local petXpOpts = Button(p, "Customize...", 100, function() if ns.TogglePetXPOptions then ns.TogglePetXPOptions() end end)
-  petXpOpts:SetPoint("TOPRIGHT", -8, y)
-  y = y - 30
-
-  Section("Zone tracker")
-  Check(p, "Show the zone tracker", "tracker", 4, y, "Small movable panel listing what you can tame in your current zone. Click a line for a waypoint.")
-  Check(p, "Hide it when there's nothing to tame", "trackerAutoHide", 300, y, "Only show the tracker in zones with something new for you.")
-  local resetPos = Button(p, "Reset tracker position", 160, function()
-    ns.db.trackerPos = nil
-    if ns.PlaceTracker then ns.PlaceTracker() end
-  end)
-  resetPos:SetPoint("TOPRIGHT", -8, y)
-  y = y - 30
-
-  Section("Minimap button & waypoints")
-  mmCheck = CreateFrame("CheckButton", nil, p, "UICheckButtonTemplate")
-  mmCheck:SetSize(22, 22)
-  mmCheck:SetPoint("TOPLEFT", 4, y)
-  local mmText = mmCheck.text or mmCheck.Text or mmCheck:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  mmText:SetFontObject("GameFontHighlightSmall")
-  mmText:ClearAllPoints()
-  mmText:SetPoint("LEFT", mmCheck, "RIGHT", 2, 0)
-  mmText:SetText("Show minimap button (works with minimap button collectors)")
-  mmCheck:SetScript("OnClick", function() if ns.ToggleMinimapButton then ns.ToggleMinimapButton() end end)
-  local clear = Button(p, "Clear waypoints", 160, function() Geo.ClearWaypoints() end)
-  clear:SetPoint("TOPRIGHT", -8, y)
-
-  -- installed version, bottom right
-  local versionText = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  versionText:SetPoint("BOTTOMRIGHT", -8, 4)
-  versionText:SetJustifyH("RIGHT")
 
   function p.Refresh()
     if not p:IsShown() then return end
-    mmCheck:SetChecked(not ns.db.minimap.hide)
-    ShowRouteColor()
-    versionText:SetText("Beast Training Tracker  |cffffffff" .. ns.VersionText() .. "|r")
+    local y = 0
+
+    -- Optional Addons Card
+    local addonsCard = CreateSettingsCard(child, "Optional Addons")
+    addonsCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+    addonsCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+    local contentY = -40
     for i, a in ipairs(Geo.AddonStatus()) do
-      local r = addonRows[i]
-      r.dot:SetTexture(a.on and "Interface\\COMMON\\Indicator-Green" or "Interface\\COMMON\\Indicator-Gray")
-      r.name:SetText(a.on and ("|cff40ff40" .. a.name .. "|r") or ("|cff9d9d9d" .. a.name .. "|r"))
-      r.text:SetText(a.on and a.text or ("|cff9d9d9d" .. a.text .. "|r"))
+      local row = addonsCard:CreateFrame("Frame", nil, addonsCard)
+      row:SetSize(500, 16)
+      row:SetPoint("TOPLEFT", 10, contentY)
+
+      local dot = row:CreateTexture(nil, "ARTWORK")
+      dot:SetSize(12, 12)
+      dot:SetPoint("LEFT", 0, 0)
+      dot:SetTexture(a.on and "Interface\\COMMON\\Indicator-Green" or "Interface\\COMMON\\Indicator-Gray")
+
+      local name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+      name:SetPoint("LEFT", 20, 0)
+      name:SetText(a.on and ("|cff40ff40" .. a.name .. "|r") or ("|cff9d9d9d" .. a.name .. "|r"))
+
+      local text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      text:SetPoint("LEFT", 100, 0)
+      text:SetWidth(400)
+      text:SetJustifyH("LEFT")
+      text:SetWordWrap(false)
+      text:SetText(a.on and a.text or ("|cff9d9d9d" .. a.text .. "|r"))
+
+      contentY = contentY - 18
     end
+    addonsCard:SetHeight(math.abs(contentY) + 10)
+    y = y + math.abs(contentY) + 20
+
+    -- Map Pins Card
+    local mapCard = CreateSettingsCard(child, "Map & Pins")
+    mapCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+    mapCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+    contentY = -40
+
+    local c1 = Check(mapCard, "Show teachers on world map", "mapPins", 10, contentY, "Pins for every beast that teaches a missing rank you can tame now.")
+    c1:SetParent(mapCard)
+    contentY = contentY - 24
+
+    local c2 = Check(mapCard, "Show teachers on minimap", "minimapPins", 10, contentY, "Pins on minimap for the nearest teachers in your zone.")
+    c2:SetParent(mapCard)
+    contentY = contentY - 24
+
+    local c3 = Check(mapCard, "Hide ALL beast pins", "pinsOff", 10, contentY, "Master switch for every pin.", function() Geo.QueuePins(true) end)
+    c3:SetParent(mapCard)
+    contentY = contentY - 24
+
+    local c4 = Check(mapCard, "Show untamed special pets", "rarePins", 10, contentY, "Pins for untamed rares you can tame.")
+    c4:SetParent(mapCard)
+    contentY = contentY - 24
+
+    local c5 = Check(mapCard, "Open map on first waypoint", "routeOpenMap", 10, contentY, "Opens world map when you set waypoints.")
+    c5:SetParent(mapCard)
+    contentY = contentY - 24
+
+    local c6 = Check(mapCard, "Draw hunt route on map", "routeLines", 10, contentY, "Numbered stops joined by dotted line.", function() ns.Geo.DrawRoute() end)
+    c6:SetParent(mapCard)
+    contentY = contentY - 30
+
+    mapCard:SetHeight(math.abs(contentY) + 10)
+    y = y + math.abs(contentY) + 20
+
+    -- Route Color Card
+    local colorCard = CreateSettingsCard(child, "Route Line Settings")
+    colorCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+    colorCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+    contentY = -40
+
+    local colorLabel = colorCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    colorLabel:SetPoint("TOPLEFT", 10, contentY)
+    colorLabel:SetText("Color & Opacity")
+    contentY = contentY - 24
+
+    local swatch = CreateFrame("Button", nil, colorCard, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    swatch:SetSize(48, 20)
+    swatch:SetPoint("TOPLEFT", 10, contentY)
+    if swatch.SetBackdrop then
+      swatch:SetBackdrop({ edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 8 })
+      swatch:SetBackdropBorderColor(0.8, 0.8, 0.8, 1)
+    end
+    swatch.color = swatch:CreateTexture(nil, "ARTWORK")
+    swatch.color:SetPoint("TOPLEFT", 3, -3)
+    swatch.color:SetPoint("BOTTOMRIGHT", -3, 3)
+
+    local function SetRouteColor(r, g, b)
+      ns.db.opts.routeColor = { r = r, g = g, b = b }
+      swatch.color:SetColorTexture(r, g, b, 1)
+      ns.Geo.DrawRoute()
+    end
+
+    swatch:SetScript("OnClick", function()
+      local r, g, b = ns.Geo.RouteColor()
+      local function apply() SetRouteColor(ColorPickerFrame:GetColorRGB()) end
+      local function cancel() SetRouteColor(r, g, b) end
+      if ColorPickerFrame.SetupColorPickerAndShow then
+        ColorPickerFrame:SetupColorPickerAndShow({ r = r, g = g, b = b, hasOpacity = false, swatchFunc = apply, cancelFunc = cancel })
+      else
+        ColorPickerFrame.hasOpacity = false
+        ColorPickerFrame.opacityFunc = nil
+        ColorPickerFrame.previousValues = { r, g, b }
+        ColorPickerFrame.func = apply
+        ColorPickerFrame.cancelFunc = cancel
+        ColorPickerFrame:SetColorRGB(r, g, b)
+        ColorPickerFrame:Hide()
+        ColorPickerFrame:Show()
+      end
+    end)
+
+    local alpha = CreateFrame("Slider", "BeastTrainingTrackerRouteAlpha", colorCard, "OptionsSliderTemplate")
+    alpha:SetWidth(160)
+    alpha:SetPoint("LEFT", swatch, "RIGHT", 20, 0)
+    alpha:SetMinMaxValues(0.1, 1)
+    alpha:SetValueStep(0.05)
+    if alpha.SetObeyStepOnDrag then alpha:SetObeyStepOnDrag(true) end
+    local low = alpha.Low or _G["BeastTrainingTrackerRouteAlphaLow"]
+    local high = alpha.High or _G["BeastTrainingTrackerRouteAlphaHigh"]
+    local label = alpha.Text or _G["BeastTrainingTrackerRouteAlphaText"]
+    if low then low:SetText("10%") end
+    if high then high:SetText("100%") end
+    alpha:SetScript("OnValueChanged", function(self, v)
+      v = math.floor(v * 20 + 0.5) / 20
+      if label then label:SetText(("Opacity: %d%%"):format(v * 100)) end
+      if ns.db and ns.db.opts.routeAlpha ~= v then
+        ns.db.opts.routeAlpha = v
+        ns.Geo.DrawRoute()
+      end
+    end)
+
+    local resetColor = Button(colorCard, "Default", 80, function()
+      local d = ns.Geo.ROUTE_DEFAULT
+      ns.db.opts.routeAlpha = d.a
+      alpha:SetValue(d.a)
+      SetRouteColor(d.r, d.g, d.b)
+    end)
+    resetColor:SetPoint("LEFT", alpha, "RIGHT", 20, 0)
+
+    colorCard:SetHeight(80)
+    y = y + 90
+
+    -- Alerts Card
+    local alertsCard = CreateSettingsCard(child, "Alerts")
+    alertsCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+    alertsCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+    contentY = -40
+
+    local a1 = Check(alertsCard, "Alert on target/mouseover", "alertTarget", 10, contentY, "Big message when you target a teaching beast.")
+    a1:SetParent(alertsCard)
+    contentY = contentY - 24
+
+    local a2 = Check(alertsCard, "Alert on nameplate", "alertNameplate", 10, contentY, "Alert when teacher nameplate appears nearby.")
+    a2:SetParent(alertsCard)
+    contentY = contentY - 24
+
+    local a3 = Check(alertsCard, "Play alert sound", "alertSound", 10, contentY, "Raid-warning sound with alerts.")
+    a3:SetParent(alertsCard)
+    contentY = contentY - 24
+
+    local a4 = Check(alertsCard, "Pet upgrade reminders", "upgradeAlert", 10, contentY, "Chat message about available upgrades.")
+    a4:SetParent(alertsCard)
+    contentY = contentY - 24
+
+    local a5 = Check(alertsCard, "Pet level-up nudges", "levelNudge", 10, contentY, "Chat message when pet reaches new rank level.")
+    a5:SetParent(alertsCard)
+    contentY = contentY - 24
+
+    local a6 = Check(alertsCard, "Let RareScanner alert", "rsHandlesRares", 10, contentY, "Skip alerts for rares if RareScanner handles them.")
+    a6:SetParent(alertsCard)
+    contentY = contentY - 24
+
+    local a7 = Check(alertsCard, "Popup on new ability", "learnToast", 10, contentY, "On-screen popup when learning new rank.")
+    a7:SetParent(alertsCard)
+    contentY = contentY - 24
+
+    local a8 = Check(alertsCard, "Show pet XP bar", "petXpBar", 10, contentY, "Display pet experience bar under pet frame.")
+    a8:SetParent(alertsCard)
+    contentY = contentY - 24
+
+    local petXpOpts = Button(alertsCard, "Customize XP Bar", 120, function() if ns.TogglePetXPOptions then ns.TogglePetXPOptions() end end)
+    petXpOpts:SetPoint("LEFT", 140, contentY + 2)
+    contentY = contentY - 24
+
+    alertsCard:SetHeight(math.abs(contentY) + 10)
+    y = y + math.abs(contentY) + 20
+
+    -- Zone Tracker Card
+    local trackerCard = CreateSettingsCard(child, "Zone Tracker")
+    trackerCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+    trackerCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+    contentY = -40
+
+    local t1 = Check(trackerCard, "Show zone tracker", "tracker", 10, contentY, "Show panel listing tameable beasts in current zone.")
+    t1:SetParent(trackerCard)
+    contentY = contentY - 24
+
+    local t2 = Check(trackerCard, "Hide when nothing to tame", "trackerAutoHide", 10, contentY, "Only show when new ranks available.")
+    t2:SetParent(trackerCard)
+    contentY = contentY - 24
+
+    local resetPos = Button(trackerCard, "Reset Tracker Position", 160, function()
+      ns.db.trackerPos = nil
+      if ns.PlaceTracker then ns.PlaceTracker() end
+    end)
+    resetPos:SetPoint("TOPLEFT", 10, contentY + 2)
+    contentY = contentY - 24
+
+    trackerCard:SetHeight(math.abs(contentY) + 10)
+    y = y + math.abs(contentY) + 20
+
+    -- Minimap Button Card
+    local minimapCard = CreateSettingsCard(child, "Minimap & Waypoints")
+    minimapCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+    minimapCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+    contentY = -40
+
+    mmCheck = CreateFrame("CheckButton", nil, minimapCard, "UICheckButtonTemplate")
+    mmCheck:SetSize(22, 22)
+    mmCheck:SetPoint("TOPLEFT", 10, contentY)
+    mmCheck:SetChecked(not ns.db.minimap.hide)
+    local mmText = mmCheck.text or mmCheck.Text or mmCheck:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    mmText:SetFontObject("GameFontHighlightSmall")
+    mmText:ClearAllPoints()
+    mmText:SetPoint("LEFT", mmCheck, "RIGHT", 2, 0)
+    mmText:SetText("Show minimap button")
+    mmCheck:SetScript("OnClick", function() if ns.ToggleMinimapButton then ns.ToggleMinimapButton() end end)
+
+    local clear = Button(minimapCard, "Clear Waypoints", 130, function() Geo.ClearWaypoints() end)
+    clear:SetPoint("LEFT", 140, contentY + 2)
+    contentY = contentY - 30
+
+    minimapCard:SetHeight(math.abs(contentY) + 10)
+    y = y + math.abs(contentY) + 20
+
+    -- Version Card
+    local versionCard = CreateSettingsCard(child, "About")
+    versionCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+    versionCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+
+    local versionText = versionCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    versionText:SetPoint("TOPLEFT", 10, -40)
+    versionText:SetText("Beast Training Tracker  |cffffffff" .. ns.VersionText() .. "|r")
+
+    versionCard:SetHeight(60)
+    y = y + 70
+
+    child:SetHeight(math.max(1, y))
+
+    -- Update route color display
+    local r, g, b, a = ns.Geo.RouteColor()
+    swatch.color:SetColorTexture(r, g, b, 1)
+    alpha:SetValue(a)
   end
   p:SetScript("OnShow", p.Refresh)
 end
 
 ------------------------------------------------------------------------
--- Tab 5: Backup
+-- Tab 6: Backup (Card-based redesign)
 ------------------------------------------------------------------------
--- Shown after login when Questie isn't installed: without it, beast
--- locations are limited to what you've spotted yourself.
 StaticPopupDialogs["BTT_NO_QUESTIE"] = {
   text = "Beast Training Tracker\n\nQuestie isn't installed, so most beast locations are unknown.\n\n"
     .. "Map pins, waypoints and hunt routes will only include beasts you've spotted yourself "
@@ -1619,7 +2157,6 @@ StaticPopupDialogs["BTT_NO_QUESTIE"] = {
   button1 = OKAY or "OK",
   button2 = "Don't remind me",
   OnCancel = function()
-    -- "Don't remind me" (Escape is off for this popup, so it can't trigger this by accident)
     if ns.db then ns.db.opts.hideQuestieWarning = true end
   end,
   timeout = 0,
@@ -1681,60 +2218,134 @@ end
 
 do
   local p = panels[ns.TAB.backup]
-  local AREA_W = WIDTH - 40
+  local scroll, child = Scroll(p, -6, 4)
 
-  Text(p, "GameFontNormal", 6, -4, "Export")
-  Text(p, "GameFontDisableSmall", 6, -22, "Copy this text (Ctrl+C) to back up your learned ranks or move them to another PC.")
-  local exportBox = TextArea(p, 4, -40, AREA_W, 90)
-  exportBox:SetScript("OnTextChanged", function(self, user)
-    if user then self:SetText(ns.Export()); self:HighlightText() end
-  end)
-  exportBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
-  local selectAll = Button(p, "Select all", 100, function() exportBox:SetFocus(); exportBox:HighlightText() end)
-  selectAll:SetPoint("TOPLEFT", 4, -136)
+  local function CreateBackupCard(title)
+    local card = CreateFrame("Frame", nil, child, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    card:SetBackdrop({
+      bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 10,
+      insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    card:SetBackdropColor(0.95, 0.92, 0.82, 0.3)
+    card:SetBackdropBorderColor(0.70, 0.62, 0.45, 0.6)
 
-  Divider(p, -166)
-  Text(p, "GameFontNormal", 6, -174, "Import")
-  Text(p, "GameFontDisableSmall", 6, -192, "Paste an export (Ctrl+V) and press Import. It only ADDS ranks - nothing you have is removed.")
-  local importBox = TextArea(p, 4, -210, AREA_W, 90)
-  local result = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  local importBtn = Button(p, "Import", 100, function()
-    local added, skipped, tamedAdded = ns.Import(importBox:GetText())
-    if not added then
-      result:SetText("|cffff4040" .. skipped .. "|r")
-    else
-      result:SetText(("%sImported: %d new rank%s, %d tamed pet%s|r%s"):format(GREEN, added, added == 1 and "" or "s",
-        tamedAdded or 0, tamedAdded == 1 and "" or "s",
-        skipped > 0 and ("  |cff808080(%d entries skipped)|r"):format(skipped) or ""))
-      importBox:SetText("")
-      exportBox:SetText(ns.Export())
+    if title then
+      local titleFs = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+      titleFs:SetPoint("TOPLEFT", 10, -8)
+      titleFs:SetText(title)
+      titleFs:SetTextColor(1, 0.82, 0)
+      card.title = titleFs
     end
-  end)
-  importBtn:SetPoint("TOPLEFT", 4, -306)
-  result:SetPoint("LEFT", importBtn, "RIGHT", 12, 0)
 
-  Divider(p, -338)
-  Text(p, "GameFontNormal", 6, -346, "|cffff6060Reset|r")
-  Text(p, "GameFontDisableSmall", 6, -364, "If the saved data looks broken: wipe it, then open Beast Training to rebuild it. Export first if unsure.")
-  local reset = Button(p, "Reset data", 110, function() StaticPopup_Show("BTT_RESET_DATA") end)
-  reset:SetPoint("TOPLEFT", 4, -382)
-
-  local info = Text(p, "GameFontDisableSmall", 6, -416)
-  info:SetWidth(AREA_W)
+    return card
+  end
 
   function p.Refresh()
     if not p:IsShown() then return end
-    if not exportBox:HasFocus() then exportBox:SetText(ns.Export()) end
+    local y = 0
+
+    -- Export Card
+    local exportCard = CreateBackupCard("|cff40ff40Export Your Data|r")
+    exportCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+    exportCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+    exportCard:SetHeight(150)
+
+    local exportDesc = exportCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    exportDesc:SetPoint("TOPLEFT", 10, -28)
+    exportDesc:SetWidth(500)
+    exportDesc:SetJustifyH("LEFT")
+    exportDesc:SetWordWrap(true)
+    exportDesc:SetText("Copy this text to back up your learned ranks or move them to another character/PC.")
+
+    local exportBox, exportBg = TextArea(exportCard, 10, -50, 540, 80)
+    exportBox:SetScript("OnTextChanged", function(self, user)
+      if user then self:SetText(ns.Export()); self:HighlightText() end
+    end)
+    exportBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+
+    local selectBtn = Button(exportCard, "Select All", 100, function() exportBox:SetFocus(); exportBox:HighlightText() end)
+    selectBtn:SetPoint("TOPLEFT", 10, -136)
+
+    y = y + 160
+
+    -- Import Card
+    local importCard = CreateBackupCard("|cff69ccf0Import Data|r")
+    importCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+    importCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+    importCard:SetHeight(170)
+
+    local importDesc = importCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    importDesc:SetPoint("TOPLEFT", 10, -28)
+    importDesc:SetWidth(500)
+    importDesc:SetJustifyH("LEFT")
+    importDesc:SetWordWrap(true)
+    importDesc:SetText("Paste an export text below and click Import. This only ADDS ranks - nothing is removed.")
+
+    local importBox, importBg = TextArea(importCard, 10, -50, 540, 80)
+
+    local result = importCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    result:SetPoint("TOPLEFT", 10, -136)
+
+    local importBtn = Button(importCard, "Import", 100, function()
+      local added, skipped, tamedAdded = ns.Import(importBox:GetText())
+      if not added then
+        result:SetText("|cffff4040Error: " .. skipped .. "|r")
+      else
+        result:SetText(("%sImported: %d new rank%s, %d tamed pet%s|r%s"):format(GREEN, added, added == 1 and "" or "s",
+          tamedAdded or 0, tamedAdded == 1 and "" or "s",
+          skipped > 0 and ("  |cff808080(%d skipped)|r"):format(skipped) or ""))
+        importBox:SetText("")
+        exportBox:SetText(ns.Export())
+      end
+    end)
+    importBtn:SetPoint("LEFT", result, "RIGHT", 12, 0)
+
+    y = y + 180
+
+    -- Data Info Card
+    local infoCard = CreateBackupCard("|cffffd100Data Storage|r")
+    infoCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+    infoCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+
+    local infoText = infoCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    infoText:SetPoint("TOPLEFT", 10, -28)
+    infoText:SetWidth(500)
+    infoText:SetJustifyH("LEFT")
+    infoText:SetWordWrap(true)
+
     local explicit = 0
     for _ in pairs(ns.db.known) do explicit = explicit + 1 end
-    info:SetText(("%d ranks saved for this character. A copy is also kept account-wide and restored automatically if this character's data goes missing.")
-      :format(explicit))
+    infoText:SetText(("%d ranks saved for this character. A copy is also kept account-wide and restored automatically if data is lost."):format(explicit))
+
+    infoCard:SetHeight(80)
+    y = y + 90
+
+    -- Reset Card
+    local resetCard = CreateBackupCard("|cffff6060Reset Data|r")
+    resetCard:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+    resetCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
+
+    local resetDesc = resetCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    resetDesc:SetPoint("TOPLEFT", 10, -28)
+    resetDesc:SetWidth(500)
+    resetDesc:SetJustifyH("LEFT")
+    resetDesc:SetWordWrap(true)
+    resetDesc:SetText("If your saved data looks broken: export a backup first, then reset it. Open Beast Training afterwards to rebuild.")
+
+    local resetBtn = Button(resetCard, "Reset Data", 110, function() StaticPopup_Show("BTT_RESET_DATA") end)
+    resetBtn:SetPoint("TOPLEFT", 10, -60)
+
+    resetCard:SetHeight(100)
+    y = y + 110
+
+    child:SetHeight(math.max(1, y))
   end
   p:SetScript("OnShow", p.Refresh)
 end
 
 ------------------------------------------------------------------------
--- Minimap button (LibDBIcon - One For All picks this up automatically)
+-- Minimap button (LibDBIcon)
 ------------------------------------------------------------------------
 local LDB = LibStub and LibStub("LibDataBroker-1.1", true)
 local DBI = LibStub and LibStub("LibDBIcon-1.0", true)
@@ -1750,14 +2361,12 @@ if LDB then
       if button == "RightButton" then
         if IsShiftKeyDown() then
           if ns.db.alertsOff then
-            -- Restore previous settings
             ns.db.opts.alertTarget = ns.db.alertsSaved.alertTarget
             ns.db.opts.alertNameplate = ns.db.alertsSaved.alertNameplate
             ns.db.opts.alertSound = ns.db.alertsSaved.alertSound
             ns.db.alertsOff = false
             ns.Say("Alerts enabled")
           else
-            -- Save current settings and turn off
             ns.db.alertsSaved = {
               alertTarget = ns.db.opts.alertTarget,
               alertNameplate = ns.db.opts.alertNameplate,
@@ -1842,6 +2451,12 @@ ns.OnInit(function(db)
   if db.pos then
     f:ClearAllPoints()
     f:SetPoint(db.pos[1], UIParent, db.pos[2], db.pos[3], db.pos[4])
+  end
+  if db.frameSize then
+    local w, h = db.frameSize[1], db.frameSize[2]
+    w = math.max(MIN_WIDTH, math.min(MAX_WIDTH, w))
+    h = math.max(MIN_HEIGHT, math.min(MAX_HEIGHT, h))
+    f:SetSize(w, h)
   end
   if DBI and launcher and not DBI:IsRegistered("BeastTrainingTracker") then
     DBI:Register("BeastTrainingTracker", launcher, db.minimap)
