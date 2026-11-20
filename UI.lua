@@ -160,12 +160,12 @@ end)
 ------------------------------------------------------------------------
 local TAB_NAMES = { "Abilities", "Hunt Planner", "Special Pets", "My Pet", "Settings", "Backup" }
 local TAB_ICONS = {
-  "Interface\\Icons\\Ability_Hunter_BeastTraining",
-  "Interface\\Icons\\Spell_Nature_HuntsmansMark",
-  "Interface\\Icons\\Ability_Hunter_CmonCat",
-  "Interface\\Icons\\Ability_Paladin_HolyLight",
-  "Interface\\Icons\\Inv_Weapon_Hand_15",
-  "Interface\\Icons\\Inv_Misc_SummonPouch"
+  "Interface\\Icons\\Ability_Hunter_BeastTraining",      -- Abilities
+  "Interface\\Icons\\Spell_Nature_HuntsmansMark",         -- Hunt Planner
+  "Interface\\Icons\\Ability_Hunter_CMonCat",             -- Special Pets (pet icon)
+  "Interface\\Icons\\Ability_Hunter_MendPet",             -- My Pet
+  "Interface\\Icons\\Inv_Gear_Cloth_RaidDeathknightmain_P_01", -- Settings (gear-like)
+  "Interface\\Icons\\Inv_Misc_Bag_Leather_SaddleBrown"   -- Backup (storage)
 }
 
 ns.TAB = { abilities = 1, hunt = 2, rares = 3, pet = 4, map = 5, backup = 6 }
