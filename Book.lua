@@ -34,7 +34,30 @@ local TABS = {
   { name = "Backup", icon = "Interface\\Icons\\INV_Misc_Book_09" },
 }
 
-local function Ink(fs, c) fs:SetTextColor(c[1], c[2], c[3]) return fs end
+-- Readability: "Darker ink" swaps these colors for near-black ones. The tables
+-- are changed in place (the tab files hold references to them), and every
+-- font string inked with one is recolored, so it applies without a /reload.
+local INK_NORMAL = {
+  [INK] = { 0.180, 0.106, 0.059 }, [INK_DIM] = { 0.42, 0.31, 0.20 },
+  [INK_GOOD] = { 0.08, 0.40, 0.06 }, [INK_RED] = { 0.55, 0.10, 0.04 },
+}
+local INK_DARK = {
+  [INK] = { 0.02, 0.01, 0.0 }, [INK_DIM] = { 0.20, 0.14, 0.08 },
+  [INK_GOOD] = { 0.0, 0.26, 0.0 }, [INK_RED] = { 0.42, 0.02, 0.0 },
+}
+local inked = setmetatable({}, { __mode = "k" }) -- font string -> ink table
+
+local function Ink(fs, c)
+  inked[fs] = c
+  fs:SetTextColor(c[1], c[2], c[3])
+  return fs
+end
+
+local function ApplyInk()
+  local dark = ns.db and ns.db.opts.inkDark
+  for t, v in pairs(dark and INK_DARK or INK_NORMAL) do t[1], t[2], t[3] = v[1], v[2], v[3] end
+  for fs, c in pairs(inked) do fs:SetTextColor(c[1], c[2], c[3]) end
+end
 
 local function Font(parent, font, color, layer)
   local fs = parent:CreateFontString(nil, layer or "OVERLAY", font)
@@ -102,6 +125,7 @@ end)
 -- the rest. PAGE_CUT is the edge band (in the art's pixels) kept unstretched.
 local PAGE_ATLAS = "spellbook-Page-Right-C60"
 local PAGE_CUT = { left = 46, right = 46, top = 118, bottom = 50 }
+local pageTextures = {} -- the parchment pieces, dimmed by the "Page brightness" setting
 
 local function NineSlicePage()
   local info = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(PAGE_ATLAS)
@@ -121,6 +145,7 @@ local function NineSlicePage()
   for row = 1, 3 do
     for col = 1, 3 do
       local t = f:CreateTexture(nil, "BACKGROUND", nil, 2)
+      pageTextures[#pageTextures + 1] = t
       t:SetTexture(file)
       t:SetTexCoord(us[col], us[col + 1], vs[row], vs[row + 1])
       local x1 = col == 1 and 0 or (col == 2 and cl or -cr)
@@ -141,6 +166,7 @@ end
 
 if not NineSlicePage() then
   local page = f:CreateTexture(nil, "BACKGROUND", nil, 2)
+  pageTextures[1] = page
   page:SetAtlas(PAGE_ATLAS)
   page:SetPoint("TOPLEFT", 2, -18)
   page:SetPoint("BOTTOMRIGHT", -1, 2)
@@ -1013,6 +1039,14 @@ ns.Book = {
   Render = function() Render() end,
 }
 
+-- Darker ink and page brightness (Settings > Reading). Brightness is a vertex
+-- color on the parchment: bright HDR screens can wash the brown ink out.
+function ns.Book.ApplyReadability()
+  ApplyInk()
+  local b = (ns.db and ns.db.opts.pageBright) or 1
+  for _, t in ipairs(pageTextures) do t:SetVertexColor(b, b, b) end
+end
+
 -- def = { render = function(page) end, search = true|nil }
 -- `page` is a frame covering the content area, shown only while this tab is open.
 function ns.Book.RegisterTab(index, def)
@@ -1035,6 +1069,7 @@ f:SetScript("OnShow", function(self)
     self:ClearAllPoints()
     self:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4])
   end
+  ns.Book.ApplyReadability()
   Render()
 end)
 

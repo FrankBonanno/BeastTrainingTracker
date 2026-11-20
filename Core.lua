@@ -708,6 +708,9 @@ local DEFAULTS = {
   petXpShowName = true, petXpShowLevel = true, petXpShowXP = true, petXpShowPct = true,
   upgradeAlert = true, levelNudge = true,
   alertsOff = false,
+  -- window: size (both windows), journal ink and page brightness.
+  -- uiStyle ("journal" / "classic") has no default: nil means the player hasn't been asked yet.
+  uiScale = 1, inkDark = false, pageBright = 1,
 }
 
 local function CharKey()
@@ -1006,7 +1009,9 @@ SlashCmdList.BEASTTRAININGTRACKER = function(msg)
       if msg == "milestones" then ns.Book.state.trophyView = "seals" end
       if msg == "chronicle" or msg == "companions" then ns.Book.state.chronView = msg end
     end
-    if ns.ShowTab and ns.TAB then ns.ShowTab(ns.TAB[key]) end
+    if ns.OpenTab then ns.OpenTab(key) end
+  elseif msg == "classic" or msg == "journal" then
+    if ns.SetUIStyle then ns.SetUIStyle(msg) end
   elseif msg:match("^where ") then
     if ns.Geo then ns.Geo.Explain(raw:match("^%S+%s+(.-)$")) end
   elseif msg == "petinfo" then
@@ -1064,6 +1069,7 @@ SlashCmdList.BEASTTRAININGTRACKER = function(msg)
     P("debug off")
   elseif msg == "help" then
     Say("/btt - toggle window   /btt abilities | hunt | rarepets | pet | settings | backup - open a tab")
+    Say("/btt classic | journal - switch between the classic window and the Hunter's Journal")
     Say("/btt pins - show/hide all beast pins on the map (same as minimap right-click)")
     Say("/btt tracker - show/hide the zone tracker   /btt minimap - show/hide minimap button")
     Say("/btt petxp - pet XP bar options")

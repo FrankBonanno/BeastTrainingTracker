@@ -131,6 +131,7 @@ local function PlaceTeach()
 end
 
 page:HookScript("OnShow", PlaceTeach)
+Book.PlaceTeach = PlaceTeach -- re-placed when the window size setting changes
 page:HookScript("OnHide", function()
   if not InCombatLockdown() then teach:Hide() end
 end)

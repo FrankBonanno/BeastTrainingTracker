@@ -1,20 +1,127 @@
 local _, ns = ...
 
--- Shared UI pieces that aren't part of the book window (Book.lua): popups,
--- the minimap button, and the entry points other files call to open the book.
+-- Shared UI pieces that aren't part of either window: popups, the minimap
+-- button, the window style choice (Hunter's Journal in Book.lua or the
+-- classic window in ClassicUI.lua) and the entry points that open them.
 
 local Geo = ns.Geo
 local Say = ns.Say
 
+-- Journal tab indices. The classic window uses the same keys (ns.Classic.TAB)
+-- for the tabs it has.
 ns.TAB = { abilities = 1, hunt = 2, rares = 3, pet = 4, chronicle = 5, trophies = 6, skinning = 7, map = 8, backup = 9 }
+
+-- Tabs the classic window doesn't have
+local JOURNAL_ONLY = { chronicle = "Chronicle", trophies = "Trophy Room", skinning = "Skinning" }
+
+-- nil until the player picks one; the journal is used until then
+local function Classic()
+  return ns.db and ns.db.opts.uiStyle == "classic" and ns.Classic ~= nil
+end
+
+local function BookFrame() return ns.Book and ns.Book.frame end
 
 function ns.ShowTab(i)
   if ns.Book then ns.Book.Open(i) end
 end
 
-function ns.ToggleMain()
-  if ns.ToggleBook then ns.ToggleBook() end
+-- Open a tab by key ("abilities", "hunt", "map", ...) in the chosen window
+function ns.OpenTab(key)
+  if Classic() then
+    if JOURNAL_ONLY[key] then
+      Say(("the %s is part of the Hunter's Journal. Type /btt journal to switch to it."):format(JOURNAL_ONLY[key]))
+      return
+    end
+    ns.Classic.Show(key)
+  else
+    ns.ShowTab(ns.TAB[key])
+  end
 end
+
+function ns.ToggleMain()
+  if Classic() then
+    ns.Classic.Toggle()
+  elseif ns.ToggleBook then
+    ns.ToggleBook()
+  end
+end
+
+------------------------------------------------------------------------
+-- Window size: one setting for both windows (text gets bigger with them)
+------------------------------------------------------------------------
+local SCALE_MIN, SCALE_MAX = 0.7, 1.5
+
+function ns.ApplyUIScale()
+  local s = (ns.db and ns.db.opts.uiScale) or 1
+  local book = BookFrame()
+  if book then book:SetScale(s) end
+  if ns.Classic then ns.Classic.frame:SetScale(s) end
+  -- the secure Beast Training buttons are placed by coordinates, so move them too
+  if book and book:IsShown() and ns.Book.PlaceTeach then ns.Book.PlaceTeach() end
+  if ns.Classic and ns.Classic.frame:IsShown() then ns.Classic.Place() end
+end
+
+function ns.SetUIScale(v)
+  v = math.floor(v * 20 + 0.5) / 20
+  v = math.max(SCALE_MIN, math.min(SCALE_MAX, v))
+  ns.db.opts.uiScale = v
+  ns.ApplyUIScale()
+end
+
+ns.OnInit(function() ns.ApplyUIScale() end)
+
+------------------------------------------------------------------------
+-- Window style: "journal" or "classic"
+------------------------------------------------------------------------
+function ns.SetUIStyle(style)
+  if style ~= "classic" then style = "journal" end
+  local book = BookFrame()
+  local wasOpen = (book and book:IsShown()) or (ns.Classic and ns.Classic.frame:IsShown())
+  if book then book:Hide() end
+  if ns.Classic then ns.Classic.frame:Hide() end
+  ns.db.opts.uiStyle = style
+  -- remembered account-wide: other characters start with it and are never asked
+  if BeastTrainingTrackerBackup then BeastTrainingTrackerBackup.__uiStyle = style end
+  -- reopen on Settings, where the switch was made
+  if wasOpen then ns.OpenTab("map") end
+  Say(style == "classic" and "using the classic window. Switch back in Settings or with /btt journal."
+    or "using the Hunter's Journal. Switch back in Settings or with /btt classic.")
+end
+
+-- Asked once per account: the first answer is saved in BeastTrainingTrackerBackup
+-- and every character after that uses it without asking.
+StaticPopupDialogs["BTT_CHOOSE_STYLE"] = {
+  text = "Beast Training Tracker\n\nWhich window would you like?\n\n"
+    .. "|cffffd100Hunter's Journal|r (new in 2.0): drawn like the spellbook, with the Chronicle, Trophy Room and Skinning tabs.\n\n"
+    .. "|cffffd100Classic|r: the simple dark window from 1.x, with light text.\n\n"
+    .. "You can change this, and the window size, in Settings at any time.",
+  button1 = "Hunter's Journal",
+  button2 = "Classic",
+  OnAccept = function() ns.SetUIStyle("journal") end,
+  OnCancel = function(_, _, reason)
+    -- the Classic button picks classic; if the popup is closed any other way,
+    -- keep the journal so it still never comes back
+    ns.SetUIStyle(reason == "clicked" and "classic" or "journal")
+  end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = false,
+  preferredIndex = 3,
+}
+
+ns.OnLogin(function()
+  if C_Timer then
+    C_Timer.After(5, function()
+      if not (ns.db and ns.isHunter) or ns.db.opts.uiStyle ~= nil then return end
+      local chosen = BeastTrainingTrackerBackup and BeastTrainingTrackerBackup.__uiStyle
+      if chosen then
+        ns.db.opts.uiStyle = chosen -- already answered on another character
+      else
+        StaticPopup_Show("BTT_CHOOSE_STYLE")
+      end
+    end)
+  end
+end)
 
 ------------------------------------------------------------------------
 -- Popups

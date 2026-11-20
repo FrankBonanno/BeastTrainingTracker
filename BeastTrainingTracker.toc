@@ -40,5 +40,6 @@ BookSettings.lua
 BookBackup.lua
 BookTrophies.lua
 BookSkinning.lua
+ClassicUI.lua
 Tracker.lua
 PetXP.lua

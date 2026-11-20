@@ -14,8 +14,10 @@ local STEP = 24
 local Render -- forward
 local page = B.RegisterTab(8, { render = function() Render() end })
 
+-- Page 1 is Window & Reading (window style, size, ink, brightness),
+-- then the older pages: map pins / addons, alerts / tracker.
 local sheets = {}
-for i = 1, 2 do
+for i = 1, 3 do
   local s = CreateFrame("Frame", nil, page)
   s:SetAllPoints()
   s:Hide()
@@ -96,7 +98,7 @@ end
 ------------------------------------------------------------------------
 -- Page 1: map pins, hunt route (left)  ·  optional addons (right)
 ------------------------------------------------------------------------
-local s1 = sheets[1]
+local s1 = sheets[2]
 
 local y = Section(s1, 1, 0, "Map Pins")
 Check(s1, 1, y, "Show teachers on the world map", "mapPins",
@@ -239,7 +241,7 @@ end
 ------------------------------------------------------------------------
 -- Page 2: alerts, pet XP bar (left)  ·  zone tracker, minimap & waypoints (right)
 ------------------------------------------------------------------------
-local s2 = sheets[2]
+local s2 = sheets[3]
 
 y = Section(s2, 1, 0, "Alerts")
 Check(s2, 1, y, "Alert when I target or mouse over a teacher", "alertTarget",
@@ -296,6 +298,93 @@ local clear = Button(s2, "Clear waypoints", 160, function() Geo.ClearWaypoints()
 clear:SetPoint("TOPLEFT", COL_X[2] + 4, -y)
 
 ------------------------------------------------------------------------
+-- Page 1: window style (left)  ·  reading: size, ink, brightness (right)
+------------------------------------------------------------------------
+local s0 = sheets[1]
+
+y = Section(s0, 1, 0, "Window Style")
+local styleNote = B.Font(s0, "SystemFont_Med1")
+styleNote:SetPoint("TOPLEFT", COL_X[1], -y)
+styleNote:SetWidth(COL_W - 10)
+styleNote:SetWordWrap(true)
+styleNote:SetText("You're using the Hunter's Journal.\n\n"
+  .. "Prefer the simple look from 1.x? The classic window is a plain dark window with light text "
+  .. "and the Abilities, Hunt Planner, Special Pets, My Pet, Settings and Backup tabs. "
+  .. "The Chronicle, Trophy Room and Skinning stay in the journal, and keep recording either way.")
+local toClassic = Button(s0, "Use the classic window", 180, function() ns.SetUIStyle("classic") end)
+toClassic:SetPoint("TOPLEFT", styleNote, "BOTTOMLEFT", 4, -14)
+Tip(toClassic, "Use the classic window", "Switch any time: the classic window's Settings tab has a button to come back, or type /btt journal.")
+
+-- Slider in the journal's ink; `fmt` turns the value into its label
+local function InkSlider(parent, name, x, yy, lo, hi, step, fmt, lowText, highText)
+  local s = CreateFrame("Slider", name, parent, "OptionsSliderTemplate")
+  s:SetWidth(240)
+  s:SetPoint("TOPLEFT", x + 8, -yy)
+  s:SetMinMaxValues(lo, hi)
+  s:SetValueStep(step)
+  if s.SetObeyStepOnDrag then s:SetObeyStepOnDrag(true) end
+  local low = s.Low or _G[name .. "Low"]
+  local high = s.High or _G[name .. "High"]
+  s.label = s.Text or _G[name .. "Text"]
+  InkText(low, INK_DIM)
+  InkText(high, INK_DIM)
+  InkText(s.label, INK)
+  if low then low:SetText(lowText) end
+  if high then high:SetText(highText) end
+  s.Show_ = function(v) if s.label then s.label:SetText(fmt(v)) end end
+  return s
+end
+
+y = Section(s0, 2, 0, "Reading")
+local function Pct(v) return math.floor(v * 100 + 0.5) end
+
+-- Size is applied when the mouse is let go: resizing the window under a dragged slider makes it jump
+local size = InkSlider(s0, "BeastTrainingTrackerBookSize", COL_X[2], y + 14, 0.7, 1.5, 0.05,
+  function(v) return ("Window and text size: %d%%"):format(Pct(v)) end, "70%", "150%")
+size:SetScript("OnValueChanged", function(self, v) self.Show_(math.floor(v * 20 + 0.5) / 20) end)
+size:SetScript("OnMouseUp", function(self)
+  local v = math.floor(self:GetValue() * 20 + 0.5) / 20
+  if ns.db and ns.db.opts.uiScale ~= v then ns.SetUIScale(v) end
+end)
+Tip(size, "Window and text size", "Makes the whole window bigger or smaller, text included. "
+  .. "Also applies to the classic window.")
+y = y + 14 + 17 + 26
+
+Check(s0, 2, y, "Darker ink", "inkDark",
+  "Near-black text instead of the spellbook's brown ink, for screens where it blends into the page.",
+  function() B.ApplyReadability() end)
+y = y + STEP + 26
+
+local bright = InkSlider(s0, "BeastTrainingTrackerBookBright", COL_X[2], y, 0.5, 1, 0.05,
+  function(v) return ("Page brightness: %d%%"):format(Pct(v)) end, "50%", "100%")
+bright:SetScript("OnValueChanged", function(self, v)
+  v = math.floor(v * 20 + 0.5) / 20
+  self.Show_(v)
+  if ns.db and ns.db.opts.pageBright ~= v then
+    ns.db.opts.pageBright = v
+    B.ApplyReadability()
+  end
+end)
+Tip(bright, "Page brightness", "Dims the parchment. Helps on HDR or very bright screens where the page glares.")
+y = y + 17 + 30
+
+local resetReading = Button(s0, "Default", 80, function()
+  ns.db.opts.inkDark, ns.db.opts.pageBright = false, 1
+  ns.SetUIScale(1)
+  B.ApplyReadability()
+  ns.Refresh()
+end)
+resetReading:SetPoint("TOPLEFT", COL_X[2] + 4, -y)
+
+local function ShowReading()
+  local o = ns.db.opts
+  size:SetValue(o.uiScale or 1)
+  size.Show_(o.uiScale or 1)
+  bright:SetValue(o.pageBright or 1)
+  bright.Show_(o.pageBright or 1)
+end
+
+------------------------------------------------------------------------
 -- Render
 ------------------------------------------------------------------------
 local function VersionNote()
@@ -313,6 +402,7 @@ Render = function()
   for _, cb in ipairs(checks) do cb:SetChecked(o[cb.key] and true or false) end
   mmCheck:SetChecked(not (ns.db.minimap and ns.db.minimap.hide))
   ShowRouteColor()
+  ShowReading()
 
   local found, status = 0, Geo.AddonStatus()
   for i, a in ipairs(status) do
@@ -332,6 +422,8 @@ Render = function()
   })
 
   if n == 1 then
+    B.SetFieldNote("Type /btt classic or /btt journal to switch windows from chat.")
+  elseif n == 2 then
     B.SetFieldNote(VersionNote())
   else
     B.SetFieldNote("Right-click the minimap button to hide every pin; middle-click it for the zone tracker.")
