@@ -2113,7 +2113,7 @@ do
     addonsCard:SetPoint("RIGHT", child, "RIGHT", -4, 0)
     local contentY = -40
     for i, a in ipairs(Geo.AddonStatus()) do
-      local row = addonsCard:CreateFrame("Frame", nil, addonsCard)
+      local row = CreateFrame("Frame", nil, addonsCard)
       row:SetSize(500, 16)
       row:SetPoint("TOPLEFT", 10, contentY)
 
