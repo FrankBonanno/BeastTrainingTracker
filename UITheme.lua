@@ -47,6 +47,11 @@ ns.UITheme = {
     -- Utility colors
     white = { r = 1.0, g = 1.0, b = 1.0, a = 1.0 },                -- Pure white (rarely used)
     transparent = { r = 0.0, g = 0.0, b = 0.0, a = 0.0 },          -- Transparent
+
+    -- Backward compatibility with old color names
+    parchment = { r = 0.353, g = 0.290, b = 0.227, a = 1.0 },      -- spellbookBg alias
+    parchmentDark = { r = 0.267, g = 0.212, b = 0.157, a = 1.0 },  -- spellbookDark alias
+    parchmentAged = { r = 0.608, g = 0.502, b = 0.345, a = 1.0 },  -- parchmentEdge alias
   },
 
   -- Textures (WoW interface paths)
