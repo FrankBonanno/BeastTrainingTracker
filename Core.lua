@@ -710,7 +710,7 @@ local DEFAULTS = {
   alertsOff = false,
   -- window: size (both windows), journal ink and page brightness.
   -- uiStyle ("journal" / "classic") has no default: nil means the player hasn't been asked yet.
-  uiScale = 1, inkDark = false, pageBright = 1,
+  uiScale = 1, textSize = 1, inkDark = false, pageBright = 1,
 }
 
 local function CharKey()

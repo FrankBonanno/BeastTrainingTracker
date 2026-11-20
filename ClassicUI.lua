@@ -464,6 +464,7 @@ local function RefreshAll()
 
   local p = panels[CurrentTab()]
   if p and p.Refresh then p.Refresh() end
+  if ns.ApplyTextSize then ns.ApplyTextSize(f) end
 end
 
 ShowTab = function(i)
@@ -1606,22 +1607,36 @@ do
   end)
   switch:SetScript("OnLeave", GameTooltip_Hide)
 
-  local sizeLabel = Text(p, "GameFontHighlightSmall", 300, y - 33, "Window size")
-  local sizeValue
-  local function SizeStep(d)
-    ns.SetUIScale((ns.db.opts.uiScale or 1) + d)
-    sizeValue:SetText(("%d%%"):format((ns.db.opts.uiScale or 1) * 100 + 0.5))
+  -- "Label  [-] 100% [+]" for a percentage option; returns a function that shows the current value
+  local function Stepper(x, label, key, set, tip)
+    local fs = Text(p, "GameFontHighlightSmall", x, y - 33, label)
+    local value
+    local function Show() value:SetText(("%d%%"):format((ns.db.opts[key] or 1) * 100 + 0.5)) end
+    local minus = Button(p, "-", 24, function() set((ns.db.opts[key] or 1) - 0.1); Show() end)
+    minus:SetPoint("LEFT", fs, "RIGHT", 8, 0)
+    value = Text(p, "GameFontHighlight", 0, 0)
+    value:ClearAllPoints()
+    value:SetPoint("LEFT", minus, "RIGHT", 4, 0)
+    value:SetWidth(44)
+    value:SetJustifyH("CENTER")
+    local plus = Button(p, "+", 24, function() set((ns.db.opts[key] or 1) + 0.1); Show() end)
+    plus:SetPoint("LEFT", value, "RIGHT", 4, 0)
+    for _, b in ipairs({ minus, plus }) do
+      b:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(label, 1, 0.82, 0)
+        GameTooltip:AddLine(tip, 1, 1, 1, true)
+        GameTooltip:Show()
+      end)
+      b:SetScript("OnLeave", GameTooltip_Hide)
+    end
+    return Show
   end
-  local minus = Button(p, "-", 24, function() SizeStep(-0.1) end)
-  minus:SetPoint("LEFT", sizeLabel, "RIGHT", 10, 0)
-  sizeValue = Text(p, "GameFontHighlight", 0, 0)
-  sizeValue:ClearAllPoints()
-  sizeValue:SetPoint("LEFT", minus, "RIGHT", 6, 0)
-  sizeValue:SetWidth(44)
-  sizeValue:SetJustifyH("CENTER")
-  local plus = Button(p, "+", 24, function() SizeStep(0.1) end)
-  plus:SetPoint("LEFT", sizeValue, "RIGHT", 6, 0)
-  p.ShowSize = function() sizeValue:SetText(("%d%%"):format((ns.db.opts.uiScale or 1) * 100 + 0.5)) end
+  local showWindow = Stepper(240, "Window size", "uiScale", function(v) ns.SetUIScale(v) end,
+    "Makes the whole window bigger or smaller, text included. Also applies to the Hunter's Journal.")
+  local showText = Stepper(480, "Text size", "textSize", function(v) ns.SetTextSize(v) end,
+    "Makes the text bigger or smaller without changing the window's size. Also applies to the Hunter's Journal.")
+  p.ShowSize = function() showWindow(); showText() end
 
   mmCheck = CreateFrame("CheckButton", nil, p, "UICheckButtonTemplate")
   mmCheck:SetSize(22, 22)

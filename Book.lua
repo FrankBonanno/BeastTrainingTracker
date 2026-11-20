@@ -1004,6 +1004,7 @@ Render = function()
     note:SetText("This page hasn't moved into the new book yet.")
   end
   back:SetShown(backFn ~= nil)
+  if ns.ApplyTextSize then ns.ApplyTextSize(f) end
 end
 
 ------------------------------------------------------------------------

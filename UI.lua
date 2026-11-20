@@ -71,6 +71,57 @@ end
 ns.OnInit(function() ns.ApplyUIScale() end)
 
 ------------------------------------------------------------------------
+-- Text size: scales the body text inside a window without resizing it.
+-- Each font string's own size is remembered the first time it's scaled, so
+-- every font keeps its proportions and 100% puts them all back exactly.
+-- Headings (over 16pt) are already large and keep their size, so they still
+-- fit their place on the page.
+------------------------------------------------------------------------
+local TEXT_MIN, TEXT_MAX = 0.9, 1.4
+local MAX_BODY = 16.5
+local fontBase = setmetatable({}, { __mode = "k" }) -- font string -> { path, size, flags, applied }
+
+local function SizeFontString(fs, scale)
+  local path, size, flags = fs:GetFont()
+  if not (path and size) then return end
+  local b = fontBase[fs]
+  -- new, or the window gave it a different font since we last sized it
+  if not b or path ~= b.path or math.abs(size - b.applied) > 0.25 then
+    if scale == 1 and not b then return end -- nothing to do at 100%
+    b = { path = path, size = size, flags = flags or "", applied = size }
+    fontBase[fs] = b
+  end
+  if b.size > MAX_BODY then return end
+  local want = b.size * scale
+  if math.abs(want - b.applied) > 0.01 or math.abs(size - want) > 0.25 then
+    if pcall(fs.SetFont, fs, b.path, want, b.flags) then b.applied = want end
+  end
+end
+
+-- Walks only the shown part of the window: hidden pages are sized when they're drawn
+local function SizeFonts(frame, scale)
+  if not frame:IsShown() then return end
+  for _, r in ipairs({ frame:GetRegions() }) do
+    if r:GetObjectType() == "FontString" then SizeFontString(r, scale) end
+  end
+  for _, c in ipairs({ frame:GetChildren() }) do SizeFonts(c, scale) end
+end
+
+-- Called by each window after it draws, and when the setting changes
+function ns.ApplyTextSize(frame)
+  if not (frame and ns.db) then return end
+  SizeFonts(frame, ns.db.opts.textSize or 1)
+end
+
+function ns.SetTextSize(v)
+  v = math.floor(v * 20 + 0.5) / 20
+  v = math.max(TEXT_MIN, math.min(TEXT_MAX, v))
+  ns.db.opts.textSize = v
+  ns.ApplyTextSize(BookFrame())
+  if ns.Classic then ns.ApplyTextSize(ns.Classic.frame) end
+end
+
+------------------------------------------------------------------------
 -- Window style: "journal" or "classic"
 ------------------------------------------------------------------------
 function ns.SetUIStyle(style)

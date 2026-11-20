@@ -340,15 +340,27 @@ local function Pct(v) return math.floor(v * 100 + 0.5) end
 
 -- Size is applied when the mouse is let go: resizing the window under a dragged slider makes it jump
 local size = InkSlider(s0, "BeastTrainingTrackerBookSize", COL_X[2], y + 14, 0.7, 1.5, 0.05,
-  function(v) return ("Window and text size: %d%%"):format(Pct(v)) end, "70%", "150%")
+  function(v) return ("Window size: %d%%"):format(Pct(v)) end, "70%", "150%")
 size:SetScript("OnValueChanged", function(self, v) self.Show_(math.floor(v * 20 + 0.5) / 20) end)
 size:SetScript("OnMouseUp", function(self)
   local v = math.floor(self:GetValue() * 20 + 0.5) / 20
   if ns.db and ns.db.opts.uiScale ~= v then ns.SetUIScale(v) end
 end)
-Tip(size, "Window and text size", "Makes the whole window bigger or smaller, text included. "
+Tip(size, "Window size", "Makes the whole window bigger or smaller, text included. "
   .. "Also applies to the classic window.")
-y = y + 14 + 17 + 26
+y = y + 14 + 17 + 30
+
+-- Text size changes only the text; also applied on mouse up, since it redraws the page
+local text = InkSlider(s0, "BeastTrainingTrackerBookText", COL_X[2], y, 0.9, 1.4, 0.05,
+  function(v) return ("Text size: %d%%"):format(Pct(v)) end, "90%", "140%")
+text:SetScript("OnValueChanged", function(self, v) self.Show_(math.floor(v * 20 + 0.5) / 20) end)
+text:SetScript("OnMouseUp", function(self)
+  local v = math.floor(self:GetValue() * 20 + 0.5) / 20
+  if ns.db and ns.db.opts.textSize ~= v then ns.SetTextSize(v) end
+end)
+Tip(text, "Text size", "Makes the text bigger or smaller without changing the window's size. "
+  .. "Headings keep their size. Also applies to the classic window.")
+y = y + 17 + 26
 
 Check(s0, 2, y, "Darker ink", "inkDark",
   "Near-black text instead of the spellbook's brown ink, for screens where it blends into the page.",
@@ -371,6 +383,7 @@ y = y + 17 + 30
 local resetReading = Button(s0, "Default", 80, function()
   ns.db.opts.inkDark, ns.db.opts.pageBright = false, 1
   ns.SetUIScale(1)
+  ns.SetTextSize(1)
   B.ApplyReadability()
   ns.Refresh()
 end)
@@ -380,6 +393,8 @@ local function ShowReading()
   local o = ns.db.opts
   size:SetValue(o.uiScale or 1)
   size.Show_(o.uiScale or 1)
+  text:SetValue(o.textSize or 1)
+  text.Show_(o.textSize or 1)
   bright:SetValue(o.pageBright or 1)
   bright.Show_(o.pageBright or 1)
 end
