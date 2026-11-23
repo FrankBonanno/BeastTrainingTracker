@@ -391,6 +391,7 @@ for _, e in ipairs({ "UNIT_PET", "PLAYER_ENTERING_WORLD", "UNIT_NAME_UPDATE", "U
   pcall(tev.RegisterEvent, tev, e)
 end
 tev:SetScript("OnEvent", function(_, e, unit, a2, a3, a4)
+  if ns.isHunter == false then return end
   if e == "UNIT_SPELLCAST_SENT" then
     -- unit, target name, castGUID, spellID
     if unit == "player" and a4 == TAME_BEAST and a2 and a2 ~= "" then pendingTame = { name = a2, t = GetTime() } end

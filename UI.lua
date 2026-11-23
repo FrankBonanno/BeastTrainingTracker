@@ -322,7 +322,13 @@ ns.OnRefresh(function()
 end)
 
 ns.OnInit(function(db)
+  if ns.isHunter == false then return end -- no button on other classes
   if DBI and launcher and not DBI:IsRegistered("BeastTrainingTracker") then
     DBI:Register("BeastTrainingTracker", launcher, db.minimap)
   end
+end)
+ns.OnNotHunter(function()
+  if DBI and DBI:IsRegistered("BeastTrainingTracker") then DBI:Hide("BeastTrainingTracker") end
+  if ns.Book and ns.Book.frame then ns.Book.frame:Hide() end
+  if ns.Classic and ns.Classic.frame then ns.Classic.frame:Hide() end
 end)

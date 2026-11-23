@@ -134,6 +134,335 @@ test("backup restores the chronicle (without map trails) if saved data is lost",
   eq(ns3.db.chronicle.pets.p1.name, "Wolfie")
 end)
 
+test("characters sharing a first name get separate backups, keyed by GUID", function()
+  local gathers = { guid = "Player-91-0000AAAA", surname = "Gathers" }
+  local hunts = { guid = "Player-91-0000BBBB", surname = "Hunts" }
+  local ns = H.load({ player = gathers })
+  ns.db.known["Bite#1"] = true
+  H.fire("PLAYER_LOGOUT")
+  local backup = H.deepcopy(BeastTrainingTrackerBackup)
+  ok(backup["Player-91-0000AAAA"], "not keyed by GUID")
+  eq(backup["Player-91-0000AAAA"].name, "Tester Gathers")
+
+  local ns2 = H.load({ player = hunts, backup = backup, db = { known = { ["Claw#1"] = true } } })
+  ok(not ns2.db.known["Bite#1"], "got another character's ranks")
+  H.fire("PLAYER_LOGOUT")
+  ok(BeastTrainingTrackerBackup["Player-91-0000AAAA"].known["Bite#1"], "other character's backup overwritten")
+  ok(BeastTrainingTrackerBackup["Player-91-0000BBBB"].known["Claw#1"], "own backup missing")
+end)
+
+test("a backup from an older version (first name and realm) is still restored", function()
+  local old = { ["Tester-TestRealm"] = { known = { ["Bite#1"] = true } } }
+  local ns = H.load({ player = { guid = "Player-91-0000AAAA", surname = "Gathers" }, backup = H.deepcopy(old) })
+  ok(ns.db.known["Bite#1"], "older backup not restored")
+  eq(BeastTrainingTrackerBackup["Tester-TestRealm"], nil, "older slot kept after moving to the new one")
+  ok(BeastTrainingTrackerBackup["Player-91-0000AAAA"].known["Bite#1"], "not moved to the new slot")
+
+  -- never merged into a character that has other records: it's likely another
+  -- character's with the same first name, so it waits for that one
+  local ns2 = H.load({ player = { guid = "Player-91-0000CCCC" }, backup = H.deepcopy(old), db = { known = { ["Claw#1"] = true } } })
+  ok(not ns2.db.known["Bite#1"], "older backup merged into another character")
+  ok(BeastTrainingTrackerBackup["Tester-TestRealm"], "another character's older slot was removed")
+end)
+
+test("moment captions read like a diary", function()
+  local M = H.load().Moments
+  local a = { t = 1000, zone = "Feralas" }
+  eq(M.Caption(nil, a, "today"), "Feralas, today")
+  eq(M.Caption(a, { t = 1060, zone = "Durotar" }), "Moments later, in Durotar")
+  eq(M.Caption(a, { t = 1000 + 10 * 60, zone = "Durotar" }), "Ten minutes later, in Durotar")
+  eq(M.Caption(a, { t = 1000 + 62 * 60, zone = "Orgrimmar" }), "An hour later, in Orgrimmar")
+  eq(M.Caption(a, { t = 1000 + 3 * 3600, zone = "Tanaris" }), "Three hours later, in Tanaris")
+  eq(M.Caption(a, { t = 1000 + 8 * 3600, zone = "Tanaris" }), "Later that day, in Tanaris")
+  eq(M.Caption(a, { t = 1000 + 600 }), "Ten minutes later") -- old entry, no zone
+  eq(M.Caption(nil, { t = 1000 }, "today"), "Today")
+end)
+
+test("moment gates stop repeats within their window", function()
+  local M, g = H.load().Moments, {}
+  ok(M.Gate(g, "campfire", 1000, 1800))
+  ok(not M.Gate(g, "campfire", 2000, 1800))
+  ok(M.Gate(g, "campfire", 2801, 1800))
+end)
+
+test("capitals by map ID or name", function()
+  local M = H.load().Moments
+  ok(M.IsCapital(1454)); ok(M.IsCapital(nil, "Orgrimmar")); ok(not M.IsCapital(2548, "Riverglades"))
+end)
+
+test("a day shows at most 8 moment cards, important ones first; the rest stay in the list", function()
+  local M = H.load().Moments
+  local day = {}
+  for i = 1, 10 do day[#day + 1] = { t = i, k = "city", m = 1, x = 1, y = 1 } end
+  day[#day + 1] = { t = 15, k = "death", m = 1, x = 1, y = 1 } -- important: always gets a card
+  day[#day + 1] = { t = 20, k = "dungeon" }              -- no position
+  day[#day + 1] = { t = 21, k = "session", m = 1, x = 1 } -- not a moment kind
+  day[#day + 1] = { t = 22, k = "zone", m = 99, x = 1 }   -- no map art
+  local moments, rest = M.Select(day, function(m) return m == 1 end)
+  eq(#moments, 8); eq(moments[1].t, 1); eq(moments[8].k, "death") -- oldest first
+  eq(moments[7].t, 7)
+  eq(#rest, 6); eq(rest[1].t, 22) -- newest first
+end)
+
+test("killers and kills are described like the diary would", function()
+  local M = H.load().Moments
+  eq(M.Describe({ name = "Gor", race = "Dwarf", class = "Warrior", level = 39 }), "a level 39 Dwarf Warrior")
+  eq(M.Describe({ name = "Gor", race = "Dwarf", class = "Warrior" }), "a Dwarf Warrior")
+  eq(M.Describe({ name = "Ambassador Malcin" }), "Ambassador Malcin")
+  eq(M.DeathTag({ name = "Ambassador Malcin" }, 1).sub, "killed you")
+  eq(M.DeathTag({ name = "Gor", race = "Dwarf", class = "Warrior" }, 2).sub, "killed you again")
+  local k = M.KillTag({ name = "Gor", race = "Dwarf", class = "Warrior", level = 39 })
+  eq(k.title, "Gor"); eq(k.sub, "a level 39 Dwarf Warrior")
+  eq(M.RunText("Razorfen Kraul", 45 * 60, 1), "Razorfen Kraul, 45 min, 1 death.")
+  eq(M.RunText("Razorfen Kraul", 3600 + 300, 0), "Razorfen Kraul, 1 h 5 min.")
+  eq(M.RunText("Razorfen Kraul", 600, 3), "Razorfen Kraul, 10 min, 3 deaths.")
+  local fmt = "%s dies, honorable kill Rank: %s (Estimated Honor Points: %d)"
+  eq(M.HonorName("Gor dies, honorable kill Rank: Private (Estimated Honor Points: 12)", fmt), "Gor")
+  eq(M.HonorName("You feel rested.", fmt), nil)
+end)
+
+-- Moments.lua against a stand-in diary: w.pet is the record of the pet that's
+-- out (nil = none), w.notes collects what got written
+local function MomentWorld(ns)
+  ns.db.chronicle = { gates = {} }
+  local w = { notes = {}, pets = {} }
+  ns.Chronicle = {
+    Current = function() return w.pet end,
+    Recent = function() return w.pet or w.recent end,
+    Get = function(id) return w.pets[id] end,
+    Position = function() return w.pos end,
+    Note = function(kind, text, _, _, rec, extra)
+      rec = rec or w.pet
+      if not rec then return false end
+      local n = { kind = kind, text = text, rec = rec }
+      for k, v in pairs(extra or {}) do n[k] = v end
+      w.notes[#w.notes + 1] = n
+      return n
+    end,
+  }
+  function w.find(text)
+    for _, n in ipairs(w.notes) do if n.text == text then return n end end
+  end
+  return w
+end
+
+test("a city reached with no pet out doesn't use up its repeat limit", function()
+  local ns = H.load()
+  local w = MomentWorld(ns)
+  H.state.zone = "Orgrimmar"
+  H.fire("ZONE_CHANGED_NEW_AREA")
+  eq(#w.notes, 0)
+  w.pet = { zones = {} }
+  H.fire("ZONE_CHANGED_NEW_AREA")
+  ok(w.find("Arrived in Orgrimmar."), "arrival lost to the repeat limit")
+end)
+
+test("a flight is written for the pet that was out at takeoff", function()
+  local ns = H.load()
+  local w = MomentWorld(ns)
+  local rec = { zones = { Durotar = 60 } }
+  w.pet, H.state.zone = rec, "Durotar"
+  UnitOnTaxi = function() return true end
+  H.fire("PLAYER_CONTROL_LOST")
+  w.pet = nil -- pets are put away for the flight
+  H.fire("PLAYER_CONTROL_LOST") -- a later loss of control mid-flight changes nothing
+  UnitOnTaxi = function() return false end
+  H.state.zone = "Feralas"
+  H.fire("PLAYER_CONTROL_GAINED")
+  local n = w.find("Flew from Durotar to Feralas.")
+  ok(n, "flight not written")
+  eq(n.rec, rec)
+  ok(w.find("Into Feralas for the first time."), "landing in a new zone not noted")
+end)
+
+test("a zone the pet has spent time in is never its first time", function()
+  local ns = H.load()
+  local w = MomentWorld(ns)
+  w.pet = { zones = { Durotar = 60 }, zonesNoted = { Durotar = true } }
+  w.pet.zones.Tanaris = 7200 -- time there gathered after the notes were seeded
+  H.state.zone = "Tanaris"
+  H.fire("ZONE_CHANGED_NEW_AREA")
+  eq(#w.notes, 0)
+end)
+
+test("a dungeon run is one card at its entrance, through a death and a corpse run", function()
+  local ns = H.load()
+  local w = MomentWorld(ns)
+  local kittery = { id = "p1", zones = { ["The Barrens"] = 600 } }
+  w.pets.p1 = kittery
+  w.pet, w.pos, H.state.zone = kittery, { m = 1414, x = 520, y = 610 }, "The Barrens"
+  H.fire("ZONE_CHANGED_NEW_AREA") -- standing at the entrance
+  -- the pet isn't back yet when the dungeon loads; the run starts anyway
+  w.pet, w.recent, w.pos = nil, kittery, nil
+  IsInInstance = function() return true, "party" end
+  GetInstanceInfo = function() return "Razorfen Kraul" end
+  H.state.zone = "Razorfen Kraul"
+  H.fire("PLAYER_ENTERING_WORLD", false, false)
+  ok(ns.db.chronicle.run, "run not started without the pet")
+  H.fire("PLAYER_DEAD") -- pet already down: the death is still Kittery's
+  ok(w.find("Fell in Razorfen Kraul."), "death inside not written")
+  -- release: a ghost at the graveyard outside, then back in
+  UnitIsDeadOrGhost = function() return true end
+  IsInInstance = function() return false end
+  H.state.zone = "The Barrens"
+  H.fire("PLAYER_ENTERING_WORLD", false, false)
+  IsInInstance = function() return true, "party" end
+  H.state.zone = "Razorfen Kraul"
+  H.fire("PLAYER_ENTERING_WORLD", false, false)
+  -- out for good (hearthstone: somewhere else entirely)
+  UnitIsDeadOrGhost = function() return false end
+  IsInInstance = function() return false end
+  H.state.zone, w.pos = "Orgrimmar", { m = 1454, x = 100, y = 100 }
+  H.fire("PLAYER_ENTERING_WORLD", false, false)
+  eq(#w.notes, 1, "the run waits a while in case you go back in") -- just the death so far
+  ns.Moments.Tick(time() + 301)
+  local n = w.find("Razorfen Kraul, a moment, 1 death.")
+  ok(n, "run not written once, with its one death")
+  eq(n.rec, kittery); eq(n.m, 1414); eq(n.x, 520) -- at the entrance, not where you hearthed
+  eq(ns.db.chronicle.run, nil)
+end)
+
+test("going straight into another dungeon writes the first run", function()
+  local ns = H.load()
+  local w = MomentWorld(ns)
+  w.pet = { id = "p1", zones = {} }
+  w.pets.p1 = w.pet
+  IsInInstance = function() return true, "party" end
+  GetInstanceInfo = function() return "Wailing Caverns" end
+  H.fire("PLAYER_ENTERING_WORLD", false, false)
+  GetInstanceInfo = function() return "Razorfen Kraul" end
+  H.fire("PLAYER_ENTERING_WORLD", false, false)
+  ok(w.find("Wailing Caverns, a moment."), "first run lost")
+  eq(ns.db.chronicle.run.name, "Razorfen Kraul")
+end)
+
+test("battleground kills add up to one moment for the match", function()
+  local ns = H.load()
+  local w = MomentWorld(ns)
+  w.pet = { zones = {} }
+  COMBATLOG_HONORGAIN = "%s dies, honorable kill Rank: %s (Estimated Honor Points: %d)"
+  IsInInstance = function() return true, "pvp" end
+  GetInstanceInfo = function() return "Warsong Gulch" end
+  for _, who in ipairs({ "Gor", "Tam", "Vex" }) do
+    H.fire("CHAT_MSG_COMBAT_HONOR_GAIN", who .. " dies, honorable kill Rank: Private (Estimated Honor Points: 12)")
+  end
+  eq(#w.notes, 0)
+  IsInInstance = function() return false end
+  H.fire("PLAYER_ENTERING_WORLD", false, false)
+  ok(w.find("Warsong Gulch: 3 honorable kills."), "match not written")
+end)
+
+test("a dead enemy in your target only counts if you fought them", function()
+  local ns = H.load()
+  local w = MomentWorld(ns)
+  w.pet = { zones = {} }
+  local dead = true
+  H.state.units.target = { name = "Gor" }
+  UnitIsPlayer = function() return true end
+  UnitCanAttack = function() return true end
+  UnitIsDead = function() return dead end
+  UnitGUID = function(u) if u == "target" then return "Player-91-0000BEEF" end end
+  H.fire("PLAYER_REGEN_ENABLED") -- someone else's kill you clicked on
+  eq(#w.notes, 0)
+  dead = false
+  H.fire("PLAYER_TARGET_CHANGED") -- you take them on
+  dead = true
+  H.fire("PLAYER_REGEN_ENABLED")
+  ok(w.find("Defeated Gor."), "your kill not written")
+end)
+
+test("a death names its killer, and says when they've killed you before", function()
+  local ns = H.load()
+  local w = MomentWorld(ns)
+  w.pet, w.pos = { zones = {} }, { m = 1414, x = 500, y = 600 }
+  H.state.zone = "The Barrens"
+  C_DeathRecap = { GetRecapEvents = function()
+    return { { overkill = 0, sourceName = "Raptor", sourceGUID = "Creature-0-1-2-3-4-5" },
+      { overkill = 40, sourceName = "Gor", sourceGUID = "Player-91-0000BEEF" } }
+  end }
+  GetPlayerInfoByGUID = function() return "Warrior", "WARRIOR", "Dwarf", "Dwarf", 2, "Gor" end
+  H.fire("PLAYER_DEAD")
+  eq(w.notes[1].text, "Fell in The Barrens.")
+  eq(w.notes[1].m, 1414)
+  eq(w.notes[1].tag.title, "a Dwarf Warrior"); eq(w.notes[1].tag.sub, "killed you")
+  eq(w.notes[1].tag.line, "a Dwarf Warrior killed you")
+  H.fire("PLAYER_DEAD")
+  eq(w.notes[2].tag.sub, "killed you again")
+  UnitIsFeignDeath = function() return true end
+  H.fire("PLAYER_DEAD")
+  eq(#w.notes, 2, "Feign Death written as a death")
+end)
+
+test("resting in a sleeping bag is a sleeping bag, not an inn", function()
+  local ns = H.load()
+  local w = MomentWorld(ns)
+  w.pet, H.state.zone = { zones = {} }, "Durotar"
+  IsResting = function() return true end
+  local auras = { [429959] = { spellId = 429959 } } -- Well-Rested, from the Cozy Sleeping Bag
+  C_UnitAuras = { GetPlayerAuraBySpellID = function(id) return auras[id] end }
+  H.fire("PLAYER_UPDATE_RESTING")
+  eq(#w.notes, 1)
+  eq(w.notes[1].text, "Slept in a sleeping bag in Durotar.")
+
+  -- the same rest without the bag's buff is an inn
+  local ns2 = H.load()
+  local w2 = MomentWorld(ns2)
+  w2.pet, H.state.zone = { zones = {} }, "Durotar"
+  IsResting = function() return true end
+  C_UnitAuras = { GetPlayerAuraBySpellID = function() return nil end }
+  H.fire("PLAYER_UPDATE_RESTING")
+  eq(#w2.notes, 1)
+  eq(w2.notes[1].text, "Rested at an inn in Durotar.")
+end)
+
+test("an honorable kill is a moment, once", function()
+  local ns = H.load()
+  local w = MomentWorld(ns)
+  w.pet = { zones = {} }
+  COMBATLOG_HONORGAIN = "%s dies, honorable kill Rank: %s (Estimated Honor Points: %d)"
+  local line = "Gor dies, honorable kill Rank: Private (Estimated Honor Points: 12)"
+  H.fire("CHAT_MSG_COMBAT_HONOR_GAIN", line)
+  H.fire("CHAT_MSG_COMBAT_HONOR_GAIN", line)
+  eq(#w.notes, 1)
+  eq(w.notes[1].text, "Defeated Gor."); eq(w.notes[1].tag.title, "Gor")
+end)
+
+test("older backup slots that are copies or empty are removed", function()
+  local backup = {
+    ["Tester-TestRealm"] = { known = { ["Bite#1"] = true } },  -- a copy of this character's ranks
+    ["Vega-OtherRealm"] = { known = {}, tamedRares = {} },     -- empty
+    ["Other-TestRealm"] = { known = { ["Claw#1"] = true } },   -- someone else's, kept
+  }
+  H.load({ player = { guid = "Player-91-0000AAAA" }, backup = backup, db = { known = { ["Bite#1"] = true, ["Bite#2"] = true } } })
+  eq(BeastTrainingTrackerBackup["Tester-TestRealm"], nil, "copy kept")
+  eq(BeastTrainingTrackerBackup["Vega-OtherRealm"], nil, "empty slot kept")
+  ok(BeastTrainingTrackerBackup["Other-TestRealm"], "another character's slot removed")
+end)
+
+test("non-hunters don't write to the backup", function()
+  local backup = { ["Player-91-0000AAAA"] = { known = { ["Bite#1"] = true } } }
+  H.load({ player = { guid = "Player-91-0000DDDD", class = "MAGE" }, backup = backup })
+  H.fire("PLAYER_LOGOUT")
+  eq(BeastTrainingTrackerBackup["Player-91-0000DDDD"], nil)
+  ok(BeastTrainingTrackerBackup["Player-91-0000AAAA"].known["Bite#1"])
+end)
+
+test("on another class the addon records nothing and draws nothing", function()
+  local ns = H.load({ player = { guid = "Player-91-0000EEEE", class = "WARLOCK" } })
+  eq(ns.isHunter, false, "warlock taken for a hunter")
+  local cleared = false
+  ns.OnNotHunter(function() cleared = true end)
+  H.fire("PLAYER_LOGIN")
+  ok(cleared, "what was on screen wasn't taken down")
+  ok(H.said("for Hunters only"), "no notice in chat")
+  H.fire("CHAT_MSG_SYSTEM", "You have learned a new ability: Claw (Rank 2).")
+  eq(ns.db.known["Claw#2"], nil, "a rank was filled in on a warlock")
+  local refreshed = false
+  ns.OnRefresh(function() refreshed = true end)
+  ns.RefreshNow()
+  ok(not refreshed, "the windows and map pins still refresh")
+end)
+
 test("reset wipes learned ranks but keeps the tamed collection", function()
   local ns = H.load()
   ns.db.known["Bite#1"] = true

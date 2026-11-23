@@ -1,6 +1,6 @@
 local _, ns = ...
 
-local isHunter = select(2, UnitClass("player")) == "HUNTER"
+local isHunter = ns.isHunter ~= false -- set by Core; confirmed again at login
 
 ------------------------------------------------------------------------
 -- What a unit teaches that you still need (highest rank per ability)
@@ -225,7 +225,7 @@ ns.OnLogin(function() loginAt = GetTime() end)
 -- Unit tooltips: "Teaches Bite 6"
 ------------------------------------------------------------------------
 local function AddTeachLines(tt)
-  if not isHunter or not ns.db then return end
+  if not isHunter or ns.isHunter == false or not ns.db then return end
   local _, unit = tt:GetUnit()
   if not unit or UnitIsPlayer(unit) then return end
   local name = UnitName(unit)
@@ -278,7 +278,7 @@ for _, e in ipairs({ "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "NAME_PLA
 end
 
 ev:SetScript("OnEvent", function(_, e, a1)
-  if not ns.db then return end
+  if not ns.db or ns.isHunter == false then return end
   if e == "PLAYER_TARGET_CHANGED" then
     pcall(Alert, "target", "target")
   elseif e == "UPDATE_MOUSEOVER_UNIT" then

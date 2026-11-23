@@ -152,6 +152,12 @@ end
 
 local function DayKey(t) return date("%Y-%m-%d", t) end
 
+-- an entry's second line in the list: its own, or its tag's (a death in a
+-- dungeon has no card, but still says who killed you)
+local function EntrySub(e)
+  return e.sub or (e.tag and e.tag.line) or nil
+end
+
 local function DayLabel(key)
   if key == DayKey(time()) then return "Today" end
   if key == DayKey(time() - 86400) then return "Yesterday" end
@@ -272,6 +278,97 @@ local function MapRow(i)
   return r
 end
 
+------------------------------------------------------------------------
+-- Moment cards: a small map of where a moment happened, taped in on
+-- alternate sides down the page, with a line of where and when beside it
+------------------------------------------------------------------------
+local M = ns.Moments
+local MOMENT_H, MOM_W, MOM_H = 120, 180, 98
+local MOMENT_NEAR = 80 -- thousandths of the map: the day's path this close to the moment is drawn
+local momentRows = {}
+
+local function EntryTip(e)
+  return function(tt)
+    tt:AddLine(date("%H:%M", e.t), 1, 0.82, 0)
+    tt:AddLine(e.text, 1, 1, 1, true)
+    if e.sub then tt:AddLine(e.sub, 0.8, 0.8, 0.8, true) end
+  end
+end
+
+local function MomentRow(i)
+  if momentRows[i] then return momentRows[i] end
+  local r = CreateFrame("Button", nil, chron)
+  r:SetSize(PAGE_W - 20, MOMENT_H - 8)
+  r.card = TapedCard(r, MOM_W + 10, MOM_H + 10)
+  r.view = BookMap.New(r.card, MOM_W, MOM_H, 12)
+  r.view.frame:SetPoint("CENTER")
+  r.caption = JournalFont(r, 14, "SystemFont_Med1")
+  r.text = Font(r, "SystemFont_Med1")
+  r.text:SetWordWrap(true)
+  local textW = PAGE_W - MOM_W - 90
+  r.caption:SetWidth(textW)
+  r.text:SetWidth(textW)
+  -- a small taped label under the text: who killed you, who you defeated
+  r.tag = CreateFrame("Frame", nil, r)
+  r.tag:SetSize(150, 34)
+  local tagShadow = r.tag:CreateTexture(nil, "BACKGROUND", nil, 1)
+  tagShadow:SetPoint("TOPLEFT", 2, -2)
+  tagShadow:SetPoint("BOTTOMRIGHT", 2, -2)
+  tagShadow:SetColorTexture(0, 0, 0, 0.18)
+  local tagCard = r.tag:CreateTexture(nil, "BACKGROUND", nil, 2)
+  tagCard:SetAllPoints()
+  tagCard:SetColorTexture(0.98, 0.94, 0.82, 1)
+  local tagTape = r.tag:CreateTexture(nil, "ARTWORK")
+  tagTape:SetSize(30, 10)
+  tagTape:SetPoint("CENTER", r.tag, "TOPLEFT", 18, 0)
+  tagTape:SetColorTexture(0.86, 0.78, 0.52, 0.85)
+  if tagTape.SetRotation then tagTape:SetRotation(math.rad(-12)) end
+  r.tag.title = JournalFont(r.tag, 13, "SystemFont_Med1")
+  r.tag.title:SetPoint("TOPLEFT", 8, -6)
+  r.tag.title:SetWordWrap(false)
+  r.tag.sub = Font(r.tag, "GameFontNormalSmall", INK_DIM)
+  r.tag.sub:SetPoint("TOPLEFT", r.tag.title, "BOTTOMLEFT", 0, -2)
+  r.tag.sub:SetWordWrap(false)
+  function r:SetTag(tag)
+    if not (tag and tag.title) then return self.tag:Hide() end
+    self.tag.title:SetText(tag.title)
+    self.tag.sub:SetText(tag.sub or "")
+    local w = math.max(self.tag.title:GetStringWidth(), self.tag.sub:GetStringWidth())
+    self.tag:SetSize(math.min(textW, w + 18), tag.sub and 34 or 22)
+    self.tag:Show()
+  end
+  function r:Layout(side)
+    self.card:ClearAllPoints(); self.caption:ClearAllPoints(); self.text:ClearAllPoints()
+    self.tag:ClearAllPoints()
+    if side == "right" then
+      self.card:SetPoint("TOPRIGHT", self, "TOPRIGHT", -16, -2)
+      self.caption:SetPoint("TOPRIGHT", self.card, "TOPLEFT", -18, -14)
+      self.text:SetPoint("TOPRIGHT", self.caption, "BOTTOMRIGHT", 0, -4)
+      self.tag:SetPoint("TOPRIGHT", self.text, "BOTTOMRIGHT", 0, -10)
+      self.caption:SetJustifyH("RIGHT"); self.text:SetJustifyH("RIGHT")
+    else
+      self.card:SetPoint("TOPLEFT", self, "TOPLEFT", 16, -2)
+      self.caption:SetPoint("TOPLEFT", self.card, "TOPRIGHT", 18, -14)
+      self.text:SetPoint("TOPLEFT", self.caption, "BOTTOMLEFT", 0, -4)
+      self.tag:SetPoint("TOPLEFT", self.text, "BOTTOMLEFT", 0, -10)
+      self.caption:SetJustifyH("LEFT"); self.text:SetJustifyH("LEFT")
+    end
+  end
+  momentRows[i] = r
+  return r
+end
+
+-- the day's path near the moment, ending at the moment itself (so each card
+-- frames its own spot, and the pooled view sees a different drawing)
+local function NearTrail(rec, key, e)
+  local out, day = {}, rec.days[key]
+  for _, p in ipairs(day and day.trail or {}) do
+    if p[1] == e.m and math.abs(p[2] - e.x) + math.abs(p[3] - e.y) <= MOMENT_NEAR then out[#out + 1] = p end
+  end
+  out[#out + 1] = { e.m, e.x, e.y }
+  return out
+end
+
 -- the bigger view, over the whole page
 local zoom = CreateFrame("Frame", nil, page)
 zoom:SetAllPoints()
@@ -308,7 +405,16 @@ local zoomKey
 local function DrawZoom()
   local rec = zoomKey and C.Get(zoomKey.id)
   local mapID, name, trail
-  if rec then mapID, name, trail = DayMap(rec, zoomKey.key) end
+  if rec and zoomKey.map then
+    -- a moment's card: the map it happened on, not the day's main one
+    local day = rec.days[zoomKey.key]
+    mapID, trail = zoomKey.map, day and day.trail or {}
+    local info = C_Map and C_Map.GetMapInfo and C_Map.GetMapInfo(mapID)
+    name = (info and info.name) or zoomKey.zone
+    if not (BookMap and BookMap.HasArt(mapID)) then mapID = nil end
+  elseif rec then
+    mapID, name, trail = DayMap(rec, zoomKey.key)
+  end
   if not mapID then
     zoom:Hide()
     return
@@ -318,9 +424,10 @@ local function DrawZoom()
   zoom.view:Draw(mapID, trail, DayMarks(rec, zoomKey.key, mapID, true), true)
 end
 
-OpenZoom = function(rec, key)
+-- `map` (and `zone` for its name) opens that map instead of the day's main one
+OpenZoom = function(rec, key, map, zone)
   if not rec then return end
-  zoomKey = { id = rec.id, key = key }
+  zoomKey = { id = rec.id, key = key, map = map, zone = zone }
   zoom:Show()
   DrawZoom()
 end
@@ -354,11 +461,23 @@ local function Paginate(rec)
     Put({ kind = "day", label = DayLabel(k) }, DAY_H)
     local sum = DaySummary(rec.days[k])
     if sum then Put({ kind = "sum", text = sum }, SUM_H) end
-    if DayMap(rec, k) then Put({ kind = "map", rec = rec, key = k }, MAP_H) end
-    local list = byDay[k] or {}
-    table.sort(list, function(a, b) return a.t > b.t end)
+    -- the day's map is the first step of the zig-zag (on the left), so the
+    -- moments start on the right under it
+    local hasDayMap = DayMap(rec, k) ~= nil
+    if hasDayMap then Put({ kind = "map", rec = rec, key = k }, MAP_H) end
+    local moments, list = {}, byDay[k] or {}
+    if M and BookMap then
+      moments, list = M.Select(list, BookMap.HasArt)
+    else
+      table.sort(list, function(a, b) return a.t > b.t end)
+    end
+    for i, e in ipairs(moments) do
+      local left = (i % 2 == 1) ~= hasDayMap
+      Put({ kind = "moment", rec = rec, key = k, e = e, prev = moments[i - 1], side = left and "left" or "right" },
+        MOMENT_H)
+    end
     for _, e in ipairs(list) do
-      Put({ kind = "entry", e = e }, ENTRY_H + (e.sub and SUB_H or 0))
+      Put({ kind = "entry", e = e }, ENTRY_H + (EntrySub(e) and SUB_H or 0))
     end
     y = y + 6
   end
@@ -366,9 +485,26 @@ local function Paginate(rec)
 end
 
 local function DrawPage(ops)
-  local nd, ns_, ne, nm = 0, 0, 0, 0
+  local nd, ns_, ne, nm, nmo = 0, 0, 0, 0, 0
   for _, op in ipairs(ops or {}) do
-    if op.kind == "map" then
+    if op.kind == "moment" then
+      nmo = nmo + 1
+      local r, e = MomentRow(nmo), op.e
+      r.rec, r.key = op.rec, op.key
+      r:ClearAllPoints()
+      r:SetPoint("TOPLEFT", chron, "TOPLEFT", 0, -(op.y + 4))
+      r:Layout(op.side)
+      r.view:Draw(e.m, NearTrail(op.rec, op.key, e), { { x = e.x, y = e.y, icon = e.icon or C.Icon(e.k), tip = EntryTip(e),
+        click = function() OpenZoom(op.rec, op.key, e.m, e.zone) end } })
+      local label = DayLabel(op.key)
+      if label == "Today" or label == "Yesterday" then label = label:lower() end
+      r.caption:SetText(M.Caption(op.prev, e, label))
+      r.text:SetText(e.text)
+      r:SetTag(e.tag)
+      r.map, r.zone = e.m, e.zone
+      r:SetScript("OnClick", function(self) OpenZoom(self.rec, self.key, self.map, self.zone) end)
+      r:Show()
+    elseif op.kind == "map" then
       local mapID, name, trail = DayMap(op.rec, op.key)
       if mapID then
         nm = nm + 1
@@ -407,8 +543,9 @@ local function DrawPage(ops)
       r.time:SetText(date("%H:%M", e.t))
       r.icon:SetTexture(e.icon or C.Icon(e.k))
       r.text:SetText(e.text)
-      r.sub:SetText(e.sub or "")
-      r.time:Show(); r.icon:Show(); r.text:Show(); r.sub:SetShown(e.sub ~= nil)
+      local sub = EntrySub(e)
+      r.sub:SetText(sub or "")
+      r.time:Show(); r.icon:Show(); r.text:Show(); r.sub:SetShown(sub ~= nil)
     end
   end
   for i = nd + 1, #dayRows do dayRows[i].mark:Hide(); dayRows[i].label:Hide(); dayRows[i].line:Hide() end
@@ -418,6 +555,7 @@ local function DrawPage(ops)
     r.time:Hide(); r.icon:Hide(); r.text:Hide(); r.sub:Hide()
   end
   for i = nm + 1, #mapRows do mapRows[i]:Hide() end
+  for i = nmo + 1, #momentRows do momentRows[i]:Hide() end
 end
 
 local function SetNote(i, title, sub)

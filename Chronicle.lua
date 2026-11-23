@@ -31,6 +31,7 @@ ns.OnInit(function(db)
   c.byGuid = c.byGuid or {} -- pet GUID -> id
   c.byName = c.byName or {} -- "Name|Family" -> id (survives a GUID change)
   c.nextId = c.nextId or 1
+  c.gates = c.gates or {}   -- moment -> when it last happened (Moments.lua repeat limits)
 end)
 
 ------------------------------------------------------------------------
@@ -43,10 +44,19 @@ local function SpellIcon(id, fallback)
 end
 
 -- icons come from the spells themselves, so they always exist on this client
-local ICON_SPELL = { start = 883, level = 635, fall = 982, hungry = 6991, fed = 6991, loyalty = 1515 }
+local ICON_SPELL = { start = 883, level = 635, fall = 982, hungry = 6991, fed = 6991, loyalty = 1515, campfire = 818 }
+-- moments without a fitting spell use plain icon files
+local ICON_PATH = {
+  city = "INV_Misc_Map_01", zone = "INV_Misc_Map02", flight = "Ability_Mount_Wyvern_01",
+  inn = "Spell_Nature_Sleep", dungeon = "INV_Misc_Key_03",
+  death = "INV_Misc_Bone_HumanSkull_01", sleep = "INV_Misc_Bag_08",
+  pvpkill = "INV_Sword_04", battleground = "INV_Sword_04",
+}
 function C.Icon(kind)
   local id = ICON_SPELL[kind]
-  return id and SpellIcon(id, "Interface\\Icons\\Ability_Hunter_BeastCall") or "Interface\\Icons\\Ability_Hunter_BeastCall"
+  if id then return SpellIcon(id, "Interface\\Icons\\Ability_Hunter_BeastCall") end
+  if ICON_PATH[kind] then return "Interface\\Icons\\" .. ICON_PATH[kind] end
+  return "Interface\\Icons\\Ability_Hunter_BeastCall"
 end
 
 function C.Duration(s)
@@ -81,10 +91,12 @@ local function Pos()
 end
 
 local function Add(rec, kind, text, sub, icon)
-  local e = { t = time(), k = kind, text = text, sub = sub, icon = icon }
+  local e = { t = time(), k = kind, text = text, sub = sub, icon = icon, zone = ns.CurrentZone() }
+  if e.zone == "" then e.zone = nil end
   e.m, e.x, e.y = Pos()
   rec.entries[#rec.entries + 1] = e
   if #rec.entries > MAX_ENTRIES then table.remove(rec.entries, 1) end
+  return e
 end
 
 -- trails are the bulk of the saved data, so only the last TRAIL_DAYS keep theirs
@@ -236,11 +248,23 @@ end
 local lastTick, lastRec
 local ticks = 0
 
+-- In combat the client hides the pet's GUID and name, so Find can't tell
+-- which pet is out. A pet can't be swapped for another mid-fight, so while
+-- one is still out it's the one we last saw.
+local function PetStillOut()
+  local ok, out = pcall(UnitExists, "pet")
+  return ok and Readable(out) and out and lastRec or nil
+end
+
+local function Out(create)
+  return Find(create) or PetStillOut()
+end
+
 local function Tick()
   ticks = ticks + 1
   -- time-together milestones move slowly; check them every few minutes
   if ticks % 20 == 0 and ns.Journal then ns.Journal.CheckSeals() end
-  local rec = Find(true)
+  local rec = Out(true)
   if not rec then
     lastTick, lastRec = nil, nil
     return
@@ -266,7 +290,7 @@ end
 -- Kills (called by Journal.lua when a beast you or your pet slew dies)
 ------------------------------------------------------------------------
 function C.OnKill(family, name)
-  local rec = Find(false)
+  local rec = Out(false)
   if not rec then return end
   rec.kills = rec.kills + 1
   rec.prey[family] = (rec.prey[family] or 0) + 1
@@ -299,7 +323,7 @@ local function ItemIcon(id)
 end
 
 function C.OnSkin(got, firsts)
-  local rec = Find(false)
+  local rec = Out(false)
   if not rec then return end
   local d = Day(rec)
   d.skins = (d.skins or 0) + 1
@@ -313,7 +337,7 @@ end
 
 -- a finished skinning session (Journal.lua), written into the current pet's diary
 function C.OnSessionEnd(s)
-  local rec = Find(false)
+  local rec = Out(false)
   if not rec then return end
   local J = ns.Journal
   local haul = J.Haul(s.items)
@@ -339,7 +363,8 @@ function C.MapCheck()
     P("art for map " .. m .. ":", layer and ("%dx%d, tiles %dx%d"):format(layer.layerWidth or 0, layer.layerHeight or 0,
       layer.tileWidth or 0, layer.tileHeight or 0) or "no layer", "files:", files and #files or 0)
   end
-  local rec = Find(false)
+  if ns.Moments then P(ns.Moments.CapitalCheck()) end
+  local rec = Out(false)
   if not rec then return P("no pet out (the trail records while your pet is out)") end
   local d = rec.days[date("%Y-%m-%d")]
   P(("%s today: %d trail points"):format(rec.name, d and d.trail and #d.trail or 0))
@@ -348,7 +373,37 @@ end
 ------------------------------------------------------------------------
 -- Reading the diaries
 ------------------------------------------------------------------------
-function C.Current() return Find(false) end
+function C.Current() return Out(false) end
+
+-- The pet that's out, or the one last at your side within `window` seconds:
+-- pets are put away when you die, fly or zone, and a moment then is still theirs.
+function C.Recent(window)
+  local rec = Out(false)
+  if rec then return rec end
+  local c, best = DB(), nil
+  for _, r in pairs(c and c.pets or {}) do
+    if r.last and time() - r.last <= window and (not best or r.last > best.last) then best = r end
+  end
+  return best
+end
+
+-- A moment (Moments.lua) for the pet that's out, or for `rec`. `extra` adds
+-- fields to the entry (a tag; m, x, y for a place other than here).
+-- Returns the entry, or false if there's no pet.
+function C.Note(kind, text, sub, icon, rec, extra)
+  rec = rec or Out(false)
+  if not rec then return false end
+  local e = Add(rec, kind, text, sub, icon or C.Icon(kind))
+  for k, v in pairs(extra or {}) do e[k] = v end
+  if ns.Refresh then ns.Refresh() end
+  return e
+end
+
+-- where you are: { m =, x =, y = } (thousandths), or nil indoors / in instances
+function C.Position()
+  local m, x, y = Pos()
+  if m then return { m = m, x = x, y = y } end
+end
 
 function C.Get(id)
   local c = DB()
@@ -376,11 +431,11 @@ end
 ------------------------------------------------------------------------
 local ev = CreateFrame("Frame")
 local function OnEvent(_, e)
-  if not ns.db then return end
+  if not ns.db or ns.isHunter == false then return end
   if e == "UNIT_PET" or e == "PLAYER_ENTERING_WORLD" or e == "UNIT_LEVEL" then
     Tick()
   else
-    local rec = Find(false)
+    local rec = Out(false)
     if not rec then return end
     if e == "UNIT_HAPPINESS" then
       CheckMood(rec)
@@ -400,5 +455,5 @@ end
 ev:SetScript("OnEvent", function(...) pcall(OnEvent, ...) end)
 
 if C_Timer and C_Timer.NewTicker then
-  C_Timer.NewTicker(TICK, function() if ns.db then pcall(Tick) end end)
+  C_Timer.NewTicker(TICK, function() if ns.db and ns.isHunter ~= false then pcall(Tick) end end)
 end

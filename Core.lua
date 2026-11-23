@@ -4,6 +4,18 @@ ns.TAG = "|cffabd473Beast Training Tracker:|r "
 function ns.Say(msg) print(ns.TAG .. msg) end
 local Say = ns.Say
 
+-- true for a hunter, false for any other class, nil while the game can't
+-- say yet. Everything the addon does checks `ns.isHunter == false` and stays
+-- quiet on other classes.
+function ns.ClassIsHunter()
+  local ok, _, cls, id = pcall(UnitClass, "player")
+  if not ok then return nil end
+  if type(cls) == "string" and cls ~= "" and not (issecretvalue and issecretvalue(cls)) then return cls == "HUNTER" end
+  if type(id) == "number" then return id == 3 end
+  return nil
+end
+ns.isHunter = ns.ClassIsHunter()
+
 ------------------------------------------------------------------------
 -- Data prep
 ------------------------------------------------------------------------
@@ -151,7 +163,7 @@ function ns.CanTame(t) return t.minLevel <= ns.PlayerLevel() end
 -- import), not something you just learned, so no popup.
 local function Mark(name, rank, quiet)
   local db = ns.db
-  if not db or not byName[name] or not rank then return end
+  if not db or ns.isHunter == false or not byName[name] or not rank then return end
   local k = Key(name, rank)
   if db.known[k] then return end
   db.known[k] = true
@@ -174,7 +186,7 @@ function ns.OnRefresh(fn) ns.refreshers[#ns.refreshers + 1] = fn end
 
 local ScanPet -- forward
 function ns.RefreshNow()
-  if not ns.db then return end
+  if not ns.db or ns.isHunter == false then return end
   ScanPet()
   for _, fn in ipairs(ns.refreshers) do fn() end
 end
@@ -182,7 +194,7 @@ end
 -- Events like PET_BAR_UPDATE fire in bursts; batch them into one refresh
 local refreshQueued
 function ns.Refresh()
-  if not ns.db or refreshQueued then return end
+  if not ns.db or ns.isHunter == false or refreshQueued then return end
   refreshQueued = true
   C_Timer.After(0.1, function()
     refreshQueued = false
@@ -713,16 +725,39 @@ local DEFAULTS = {
   uiScale = 1, textSize = 1, inkDark = false, pageBright = 1,
 }
 
-local function CharKey()
+local function Plain(v)
+  return not (issecretvalue and issecretvalue(v)) and type(v) == "string" and v ~= "" and v or nil
+end
+
+-- "First Surname". On Forever, UnitName's second return is the surname, not a
+-- realm, and many characters share a first name.
+local function PlayerName()
+  local ok, full = pcall(GetUnitName, "player", true)
+  full = ok and Plain(full)
+  if full and full:find(" ", 1, true) then return full end
+  local ok2, first, second = pcall(UnitName, "player")
+  first, second = ok2 and Plain(first), ok2 and Plain(second)
+  if first and second then return first .. " " .. second end
+  return first or full or "?"
+end
+ns.PlayerName = PlayerName
+
+-- How 2.1.0 and older keyed the backup: first name and realm. Characters
+-- sharing a first name on one realm shared it, so it's only read as a fallback.
+local function LegacyCharKey()
   local name = UnitName("player") or "?"
   local realm = GetRealmName() or ""
-  -- Realm name is available: use standard "FirstName-RealmName" format
-  if realm ~= "" then
-    return name .. "-" .. realm
-  end
-  -- Forever server: UnitName includes both first and last name, realm is unavailable
-  -- Full name (e.g. "John Smith") provides unique identification
+  if realm ~= "" then return name .. "-" .. realm end
   return name
+end
+
+-- The backup's key for this character: its player GUID, which no other
+-- character shares and which never changes
+local function CharKey()
+  local ok, guid = pcall(UnitGUID, "player")
+  guid = ok and Plain(guid)
+  if guid and guid:find("^Player%-") then return guid end
+  return PlayerName() .. "-" .. (Plain(GetRealmName()) or "")
 end
 
 -- A copy of the chronicle for the account-wide backup. Daily map trails are
@@ -741,8 +776,9 @@ local function InitDB()
   BeastTrainingTrackerBackup = BeastTrainingTrackerBackup or {}
   local db = BeastTrainingTrackerDB
   ns.db = db
-  -- Check if player is a hunter (initialize early)
-  ns.isHunter = select(2, UnitClass("player")) == "HUNTER"
+  -- Check if player is a hunter (initialize early; confirmed at login)
+  local hunter = ns.ClassIsHunter()
+  if hunter ~= nil then ns.isHunter = hunter end
   db.known = db.known or {}
   db.manualOff = nil
   db.collapsed = db.collapsed or {}
@@ -762,6 +798,16 @@ local function InitDB()
   db.petLinks = db.petLinks or {}
   local key = CharKey()
   local bk = BeastTrainingTrackerBackup[key]
+  if type(bk) ~= "table" then
+    -- saved before the GUID could be read (full name and realm)
+    bk = BeastTrainingTrackerBackup[PlayerName() .. "-" .. (Plain(GetRealmName()) or "")]
+  end
+  if type(bk) ~= "table" and not next(db.known) then
+    -- an older version may have saved it by first name and realm. That slot
+    -- can belong to another character with the same first name, so it's only
+    -- used when this character has no records of its own.
+    bk = BeastTrainingTrackerBackup[LegacyCharKey()]
+  end
   local restored, restoredPets = 0, 0
   if type(bk) == "table" then
     for k in pairs(type(bk.known) == "table" and bk.known or {}) do
@@ -786,12 +832,49 @@ local function InitDB()
     db.chronicle = CopyChronicle(bc)
     for _ in pairs(bc.pets) do restoredChron = restoredChron + 1 end
   end
+  -- only hunters are backed up: a non-hunter has nothing to save, and before
+  -- 2.1.1 its empty records could overwrite a hunter's that shared its key
   local function SyncBackup()
+    if not ns.isHunter then return end
+    -- the GUID may only become readable after loading; move the entry then
+    local now = CharKey()
+    if now ~= key then BeastTrainingTrackerBackup[key], key = nil, now end
     BeastTrainingTrackerBackup[key] = { known = db.known, tamedRares = db.tamedRares, tamedNicks = db.tamedNicks, petLinks = db.petLinks,
-      chronicle = type(db.chronicle) == "table" and CopyChronicle(db.chronicle) or nil }
+      chronicle = type(db.chronicle) == "table" and CopyChronicle(db.chronicle) or nil,
+      name = PlayerName(), realm = Plain(GetRealmName()), saved = time() }
   end
   SyncBackup()
   ns.SyncBackup = SyncBackup
+
+  -- Tidy slots saved by 2.1.0 and older (keyed "First-Realm", no name inside):
+  -- empty ones go; this character's own goes once everything in it is in this
+  -- character's records (it was restored above, or was a copy). A slot holding
+  -- ranks or pets this character doesn't have most likely belongs to another
+  -- character with the same first name, so it waits for that one to log in.
+  local function Count(t) return type(t) == "table" and next(t) ~= nil end
+  local function Empty(e)
+    return not Count(e.known) and not Count(e.tamedRares)
+      and not (type(e.chronicle) == "table" and Count(e.chronicle.pets))
+  end
+  local function Within(e)
+    for k in pairs(type(e.known) == "table" and e.known or {}) do
+      if not db.known[k] then return false end
+    end
+    for k in pairs(type(e.tamedRares) == "table" and e.tamedRares or {}) do
+      if db.tamedRares[k] == nil then return false end
+    end
+    return true
+  end
+  local legacy = LegacyCharKey()
+  for k, e in pairs(BeastTrainingTrackerBackup) do
+    if type(k) == "string" and type(e) == "table" and e.name == nil
+      and not k:find("^__") and not k:find("^Player%-") then
+      if Empty(e) or (ns.isHunter and k == legacy and Within(e)) then
+        BeastTrainingTrackerBackup[k] = nil -- clearing a field mid-traversal is allowed
+      end
+    end
+  end
+
   if restored > 0 then Say(("restored %d learned ranks from backup."):format(restored)) end
   if restoredPets > 0 then Say(("restored %d tamed special pets from backup."):format(restoredPets)) end
   if restoredChron > 0 then Say(("restored the chronicle of %d companion%s from backup."):format(restoredChron, restoredChron == 1 and "" or "s")) end
@@ -833,10 +916,17 @@ for _, e in ipairs({
 
 ns.loginHooks = {}
 function ns.OnLogin(fn) ns.loginHooks[#ns.loginHooks + 1] = fn end
+-- run once when login shows this character isn't a hunter
+ns.offHooks = {}
+function ns.OnNotHunter(fn) ns.offHooks[#ns.offHooks + 1] = fn end
 
 local function CheckIsHunter()
-  ns.isHunter = select(2, UnitClass("player")) == "HUNTER"
+  local hunter = ns.ClassIsHunter()
+  if hunter == nil then hunter = ns.isHunter ~= false end -- still unknown: don't lock a hunter out
+  ns.isHunter = hunter
   if not ns.isHunter then
+    -- clear anything already put on screen before the class was known
+    for _, fn in ipairs(ns.offHooks or {}) do pcall(fn) end
     Say("|cffffd100This addon is for Hunters only.|r Disabled on this character.")
     -- Unregister all events to disable functionality
     for _, evt in ipairs({
@@ -863,6 +953,8 @@ ev:SetScript("OnEvent", function(_, e, a1)
     ns.Refresh()
   elseif e == "PLAYER_LOGOUT" then
     if ns.SyncBackup then ns.SyncBackup() end
+  elseif ns.isHunter == false then
+    return
   elseif e == "CRAFT_SHOW" or e == "CRAFT_UPDATE" then
     ScanBeastTraining()
   elseif e == "TRAINER_SHOW" or e == "TRAINER_UPDATE" then
@@ -1038,6 +1130,8 @@ SlashCmdList.BEASTTRAININGTRACKER = function(msg)
     if ns.ToggleBook then ns.ToggleBook() end
   elseif msg == "mapcheck" then
     if ns.Chronicle and ns.Chronicle.MapCheck then ns.Chronicle.MapCheck() end
+  elseif msg == "killcheck" then
+    if ns.Journal and ns.Journal.ToggleKillCheck then ns.Journal.ToggleKillCheck() end
   elseif msg == "debug" then
     ns.debugOn = true
     pcall(dbgFrame.RegisterAllEvents, dbgFrame)

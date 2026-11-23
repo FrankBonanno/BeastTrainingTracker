@@ -29,6 +29,7 @@ Rares.lua
 Alerts.lua
 Journal.lua
 Chronicle.lua
+Moments.lua
 UI.lua
 Book.lua
 BookHunt.lua

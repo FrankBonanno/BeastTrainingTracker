@@ -196,7 +196,9 @@ charsRec:SetScript("OnEnter", function(self)
   GameTooltip:AddLine("Restored automatically if a character's data goes missing.", 1, 1, 1, true)
   local backup = BeastTrainingTrackerBackup or {}
   for _, k in ipairs(BackupKeys()) do
-    GameTooltip:AddDoubleLine(k, ("%d ranks"):format(CountKeys(backup[k].known)), 0.8, 0.8, 0.8, 1, 1, 1)
+    -- entries from 2.1.0 and older have no name; their key is "First-Realm"
+    local label = backup[k].name or (k .. " (older backup)")
+    GameTooltip:AddDoubleLine(label, ("%d ranks"):format(CountKeys(backup[k].known)), 0.8, 0.8, 0.8, 1, 1, 1)
   end
   GameTooltip:Show()
 end)

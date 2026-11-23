@@ -576,6 +576,7 @@ local function ClearDots()
 end
 
 function Geo.DrawRoute()
+  if ns.isHunter == false then wipe(Geo.route) end
   if mapInfo then
     mapInfo:SetShown(#Geo.route > 0)
     mapInfo.text:SetText(("|cffabd473Beast hunt:|r %d stop%s"):format(#Geo.route, #Geo.route == 1 and "" or "s"))
@@ -1036,7 +1037,7 @@ function Geo.UpdatePins()
   if not ns.db or not Libs() then return end
   ClearPins()
   local o = ns.db.opts
-  if o.pinsOff or not (o.mapPins or o.minimapPins) then return end
+  if ns.isHunter == false or o.pinsOff or not (o.mapPins or o.minimapPins) then return end
 
   local pm, px, py = PlayerPos()
   local nearby = {}
@@ -1188,7 +1189,15 @@ for _, e in ipairs({ "ADDON_LOADED", "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_W
   "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT" }) do
   pcall(zev.RegisterEvent, zev, e)
 end
+-- another class: take down anything already drawn
+ns.OnNotHunter(function()
+  ClearPins()
+  ClearShown()
+  if Geo.DrawRoute then pcall(Geo.DrawRoute) end
+end)
+
 zev:SetScript("OnEvent", function(_, e, unit)
+  if ns.isHunter == false then return end
   if e == "ADDON_LOADED" then
     if unit == "Blizzard_WorldMap" then HookWorldMap() end
   elseif e == "NAME_PLATE_UNIT_ADDED" then

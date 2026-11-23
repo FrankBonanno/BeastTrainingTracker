@@ -37,6 +37,7 @@ ns.OnInit(function(db)
   j.seals = j.seals or {}      -- seal id -> time earned
   j.since = j.since or time()
   j.sessions = j.sessions or {} -- finished skinning sessions, oldest first
+  j.npcFamily = j.npcFamily or {} -- creature ID -> family, for every beast kind you've seen
 end)
 
 ------------------------------------------------------------------------
@@ -55,6 +56,16 @@ local function Readable(...)
   return true
 end
 
+-- the creature ID inside a GUID (Creature-0-server-instance-zone-npcID-spawn)
+local function NpcOf(guid)
+  if type(guid) ~= "string" then return end
+  local kind, _, _, _, _, npc = strsplit("-", guid)
+  if kind == "Creature" or kind == "Vehicle" then return tonumber(npc) end
+end
+
+-- Families are remembered per creature kind and saved, so seeing one
+-- Riverglades Panther once is enough for every one you kill after it
+-- (in combat their GUIDs are hidden, so a mob pulled mid-fight can't be read).
 local function Remember(unit)
   if not UnitExists(unit) or UnitIsPlayer(unit) or UnitPlayerControlled(unit) then return end
   local guid = UnitGUID(unit)
@@ -64,6 +75,8 @@ local function Remember(unit)
   if familyCount >= MAX_TRACKED then wipe(familyOf); familyCount = 0 end
   familyOf[guid] = fam or BEAST
   familyCount = familyCount + 1
+  local npc, j = NpcOf(guid), DB()
+  if npc and j then j.npcFamily[npc] = fam or BEAST end
 end
 
 local function FamilyByName(name)
@@ -72,6 +85,25 @@ local function FamilyByName(name)
   if rare then return rare.family end
   local list = ns.teacherIndex and ns.teacherIndex[name]
   if list and list[1] then return list[1].t.family end
+end
+
+local function FamilyOf(guid, name)
+  local fam = familyOf[guid]
+  if fam ~= nil then return fam end
+  local npc, j = NpcOf(guid), DB()
+  if npc and j and j.npcFamily[npc] then return j.npcFamily[npc] end
+  return FamilyByName(name)
+end
+
+-- /btt killcheck: says in chat why each corpse you loot does or doesn't count
+local killCheck = false
+function J.ToggleKillCheck()
+  killCheck = not killCheck
+  ns.Say("kill check " .. (killCheck and "on - loot a few corpses and watch chat. /btt killcheck again to stop."
+    or "off."))
+end
+local function Check(...)
+  if killCheck then print("|cffabd473BTT kills|r", ...) end
 end
 
 ------------------------------------------------------------------------
@@ -371,10 +403,11 @@ function J.FamilyKills()
 end
 
 local function CountKill(guid, name)
-  if type(guid) ~= "string" or not guid:find("^Creature") or counted[guid] then return end
-  local fam = familyOf[guid]
-  if fam == nil then fam = FamilyByName(name) end
-  if not fam then return end
+  if type(guid) ~= "string" or not guid:find("^Creature") then return end
+  if counted[guid] then return Check("already counted", NpcOf(guid)) end
+  local fam = FamilyOf(guid, name)
+  if not fam then return Check(("not counted: creature %s isn't a beast I've seen yet"):format(tostring(NpcOf(guid)))) end
+  Check(("counted: %s (creature %s)"):format(fam, tostring(NpcOf(guid))))
   if countedCount >= MAX_TRACKED then wipe(counted); countedCount = 0 end
   counted[guid], countedCount = true, countedCount + 1
   local j = DB()
@@ -640,7 +673,7 @@ local function Retarget()
   local guid = UnitGUID("target")
   if not Readable(guid) or type(guid) ~= "string" or counted[guid] then return end
   local name = SafeName("target")
-  if familyOf[guid] == nil and not FamilyByName(name) then return end
+  if not FamilyOf(guid, name) then return end
   local dead = UnitIsDead("target")
   local denied = UnitIsTapDenied and UnitIsTapDenied("target")
   if not Readable(dead, denied) then return end
@@ -688,10 +721,13 @@ end
 -- A corpse you can loot is one you killed (GetLootSourceInfo: guid, quantity, guid, quantity...)
 local function CountLootSources()
   if not GetLootSourceInfo then return end
+  -- the corpse you clicked is usually under the mouse or targeted, and readable by now
+  Remember("mouseover")
+  Remember("target")
   for slot = 1, GetNumLootItems() do
     local src = { GetLootSourceInfo(slot) }
     for i = 1, #src, 2 do
-      if Readable(src[i]) then CountKill(src[i]) end
+      if Readable(src[i]) then CountKill(src[i]) else Check("not counted: the game hid this corpse's ID") end
     end
   end
 end
@@ -735,9 +771,9 @@ for _, e in ipairs({ "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "NAME_PLA
   "PLAYER_UPDATE_RESTING", "ZONE_CHANGED_NEW_AREA" }) do
   pcall(ev.RegisterEvent, ev, e)
 end
-ev:SetScript("OnEvent", function(...) pcall(OnEvent, ...) end)
+ev:SetScript("OnEvent", function(...) if ns.isHunter ~= false then pcall(OnEvent, ...) end end)
 
 -- closes a session that's gone quiet, even while you stand still
 if C_Timer and C_Timer.NewTicker then
-  C_Timer.NewTicker(60, function() if ns.db then pcall(CheckSessionEnd) end end)
+  C_Timer.NewTicker(60, function() if ns.db and ns.isHunter ~= false then pcall(CheckSessionEnd) end end)
 end

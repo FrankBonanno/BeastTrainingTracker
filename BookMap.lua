@@ -129,7 +129,14 @@ function View:Draw(mapID, trail, marks, loose)
   local first, last = trail and trail[1], trail and trail[#trail]
   local sig = ("%s:%d:%d:%s:%s:%s"):format(tostring(mapID), #(trail or {}), #(marks or {}), tostring(loose),
     first and (first[2] .. "," .. first[3]) or "", last and (last[2] .. "," .. last[3]) or "")
-  if sig == self.sig then return self.ok end
+  if sig == self.sig then
+    -- same drawing, but the marks may belong to another entry now
+    for i, mk in ipairs(marks or {}) do
+      local b = self.marks[i]
+      if b then b.tip, b.click = mk.tip, mk.click; b.icon:SetTexture(mk.icon or "Interface\\Icons\\Ability_Hunter_BeastCall") end
+    end
+    return self.ok
+  end
   self.sig = sig
   self.ok = false
   local info = mapID and Layer(mapID)
@@ -226,14 +233,16 @@ function View:Draw(mapID, trail, marks, loose)
         GameTooltip:Show()
       end)
       b:SetScript("OnLeave", GameTooltip_Hide)
+      -- a click on a mark is a click on whatever holds the map
+      b:SetScript("OnClick", function(self) if self.click then self.click() end end)
       self.marks[i] = b
     end
     b:SetSize(self.markSize, self.markSize)
     b:ClearAllPoints()
     b:SetPoint("CENTER", self.canvas, "TOPLEFT", mk.x / 1000 * LW * s, -mk.y / 1000 * LH * s)
     b.icon:SetTexture(mk.icon or "Interface\\Icons\\Ability_Hunter_BeastCall")
-    b.tip = mk.tip
-    b:EnableMouse(mk.tip ~= nil)
+    b.tip, b.click = mk.tip, mk.click
+    b:EnableMouse(mk.tip ~= nil or mk.click ~= nil)
     b:Show()
   end
   for i = #(marks or {}) + 1, #self.marks do self.marks[i]:Hide() end

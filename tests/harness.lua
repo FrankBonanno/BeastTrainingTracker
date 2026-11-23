@@ -3,7 +3,7 @@
 -- files (UI.lua, Tracker.lua, Alerts.lua) aren't loaded by the tests.
 local H = {}
 
-local LOGIC_FILES = { "Data.lua", "RarePets.lua", "RareIds.lua", "Core.lua", "Geo.lua", "Rares.lua" }
+local LOGIC_FILES = { "Data.lua", "RarePets.lua", "RareIds.lua", "Core.lua", "Geo.lua", "Rares.lua", "Moments.lua" }
 
 ------------------------------------------------------------------------
 -- Fake frames: remember scripts and registered events, ignore the rest
@@ -63,6 +63,7 @@ end
 ------------------------------------------------------------------------
 -- H.load(opts): fresh globals + fresh addon. Returns the addon namespace.
 --   opts.backup = BeastTrainingTrackerBackup table to start with
+--   opts.player = { guid=, surname=, class= } (default: "Tester", no GUID, hunter)
 ------------------------------------------------------------------------
 function H.load(opts)
   opts = opts or {}
@@ -76,6 +77,7 @@ function H.load(opts)
     trainer = nil,   -- { {"Bite","Rank 1","available"}, ... }
     units = {},      -- other units: units.target = { name = "Prairie Wolf" }
     faction = "Horde",
+    player = opts.player or {},
   }
   local S = H.state
 
@@ -113,10 +115,15 @@ function H.load(opts)
   ERR_LEARN_ABILITY_S = "You have learned a new ability: %s."
   ERR_LEARN_SPELL_S = "You have learned a new spell: %s."
 
-  UnitClass = function(u) if u == "player" then return "Hunter", "HUNTER" end end
+  UnitClass = function(u)
+    if u == "player" then
+      local c = S.player.class or "HUNTER"
+      return c:sub(1, 1) .. c:sub(2):lower(), c
+    end
+  end
   UnitFactionGroup = function(u) if u == "player" then return S.faction, S.faction end end
   UnitName = function(u)
-    if u == "player" then return "Tester" end
+    if u == "player" then return "Tester", S.player.surname end
     if u == "pet" and S.pet then return S.pet.name end
     if S.units[u] then return S.units[u].name end
   end
@@ -132,7 +139,10 @@ function H.load(opts)
     return S.units[u] ~= nil
   end
   UnitCreatureFamily = function(u) if u == "pet" and S.pet then return S.pet.family end end
-  UnitGUID = function(u) if u == "pet" and S.pet then return S.pet.guid end end
+  UnitGUID = function(u)
+    if u == "player" then return S.player.guid end
+    if u == "pet" and S.pet then return S.pet.guid end
+  end
   UnitIsUnit = function() return false end
   UnitIsPlayer = function(u) return u == "player" end
   GetRealmName = function() return "TestRealm" end
@@ -151,6 +161,9 @@ function H.load(opts)
   C_SpellBook, Enum, C_AddOns, C_Map, LibStub, TomTom, NpcDB, LibQuestieDB = nil, nil, nil, nil, nil, nil, nil, nil
   RareScannerDB, ClassTrainerFrame, GetNumCrafts, GetCraftInfo, QuestieLoader = nil, nil, nil, nil, nil
   UiMapPoint, C_SuperTrack = nil, nil
+  UnitOnTaxi, IsInInstance, GetInstanceInfo, IsResting, C_UnitAuras, UnitBuff = nil, nil, nil, nil, nil, nil
+  UnitIsFeignDeath, C_DeathRecap, GetPlayerInfoByGUID, COMBATLOG_HONORGAIN, UnitRace, UnitCanAttack = nil, nil, nil, nil, nil, nil
+  UnitIsDeadOrGhost = nil
 
   local ns = {}
   for _, file in ipairs(LOGIC_FILES) do

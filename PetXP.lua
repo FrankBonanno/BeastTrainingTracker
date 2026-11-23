@@ -358,6 +358,9 @@ for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "UNIT_PET", "UNIT_PET_EXPERIENCE",
   pcall(ev.RegisterEvent, ev, e)
 end
 -- after Blizzard has shown/hidden the pet frame for this event
-ev:SetScript("OnEvent", function() if C_Timer then C_Timer.After(0, Update) else Update() end end)
+ev:SetScript("OnEvent", function()
+  if ns.isHunter == false then return end
+  if C_Timer then C_Timer.After(0, Update) else Update() end
+end)
 
 ns.OnRefresh(function() Update() end)

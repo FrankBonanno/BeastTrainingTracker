@@ -8,9 +8,24 @@ All notable changes to Beast Training Tracker, newest first.
 
 - **Text size**: make the text bigger or smaller, from 90% to 140%, without changing the window's size. Headings keep their size so they still fit the page. It's in Settings in both windows, next to Window size, and the Default button on the journal's Window & Reading page resets it too.
 
+- **Chronicle moments**: the Chronicle now notes what happens to you and your pet, each as a small map card on the page. The day's map and the cards zig-zag down the page, with a line like "Ten minutes later, in The Barrens":
+  - **your deaths**, with a taped tag naming who killed you ("a level 39 Dwarf Warrior - killed you again")
+  - **PvP kills**, with a tag naming who you defeated (only players you fought; at most ten a day). A battleground is one line for the match: "Warsong Gulch: 12 honorable kills."
+  - **dungeon runs**, one card per run on the map where you went in ("Razorfen Kraul, 45 min, 1 death."). A run lasts through a release and corpse run or a /reload, and is written a few minutes after you come out, even if you hearth out.
+  - level-ups, rare kills and kill milestones
+  - sitting by a campfire, sleeping in the Cozy Sleeping Bag, arriving in a capital city, your pet's first time in a zone, flights ("Flew from Orgrimmar to Feralas") and resting at an inn
+
+  A day shows up to eight cards; deaths, kills, dungeons and level-ups always get theirs first, and the rest go in the list below. Small moments repeat at most once in a while (a campfire once per half hour, a city or inn once per two hours). Feign Death doesn't count as a death. A death still counts if your pet fell first. A death with no map card, like one inside a dungeon, still says who killed you in the list. `/btt mapcheck` also says whether you're in a capital.
+
 ### Fixed
 
 - The changelog shows every version again, not only the newest one.
+- **Beasts slain** missed most kills, so the Chronicle had little to write about: kill milestones, rare kills and the Slayer seals rarely came up. A beast only counted if you'd looked at that exact mob before the fight. Now, once you've seen one beast of a kind, every one of that kind you kill counts, and the corpse you loot is checked too. Kills from before this fix can't be recovered.
+- **Time together** stopped counting during fights, because the game hides your pet's name and ID in combat. So did kills made with your pet mid-fight. Both now keep counting while the same pet is out. Time already missed can't be recovered.
+- **Account-wide backup**: each character's backup now has a slot of its own. It used to be saved under first name and realm, so characters sharing a first name on one realm (Socks Gathers, Socks Hunts…) shared one slot. One character's backup could overwrite another's, or be restored onto the wrong character. Non-hunters no longer write to the backup at all. Nothing to do on your end: the next time each hunter logs in, its old backup moves to its own slot and the old one is removed. Empty old slots are removed too. An old slot holding another character's ranks waits until that character logs in. The Backup page shows each character's full name.
+- On characters that aren't hunters, the addon still showed beast pins on the map and minimap, tracked kills and pet time, and could fill in ranks. Now it stays fully off on other classes: no pins, no minimap button, no tracking and no changes to your saved ranks. It says once in chat that it's for hunters only.
+- Clicking a moment's little map now opens a bigger view of the map that moment happened on. It used to open the zone you spent most of that day in. Clicking the icon on the card opens it too.
+- New `/btt killcheck`: says in chat whether each corpse you loot counted as a kill, and why not.
 
 ## 2.1.0 - 2026-11-20
 
