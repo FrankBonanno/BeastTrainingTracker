@@ -799,8 +799,11 @@ local function InitDB()
   local key = CharKey()
   local bk = BeastTrainingTrackerBackup[key]
   if type(bk) ~= "table" then
-    -- saved before the GUID could be read (full name and realm)
+    -- saved before the GUID could be read (full name and realm). Only a slot
+    -- this version wrote (it has a name): without a surname, this key is the
+    -- same as the older first-name key, which is handled below.
     bk = BeastTrainingTrackerBackup[PlayerName() .. "-" .. (Plain(GetRealmName()) or "")]
+    if type(bk) == "table" and bk.name == nil then bk = nil end
   end
   if type(bk) ~= "table" and not next(db.known) then
     -- an older version may have saved it by first name and realm. That slot
@@ -833,7 +836,7 @@ local function InitDB()
     for _ in pairs(bc.pets) do restoredChron = restoredChron + 1 end
   end
   -- only hunters are backed up: a non-hunter has nothing to save, and before
-  -- 2.1.1 its empty records could overwrite a hunter's that shared its key
+  -- 2.1.2 its empty records could overwrite a hunter's that shared its key
   local function SyncBackup()
     if not ns.isHunter then return end
     -- the GUID may only become readable after loading; move the entry then
