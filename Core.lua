@@ -43,6 +43,7 @@ local ICONS = {
   ["Savage Rend"] = "Ability_Hunter_Pet_Raptor",
   ["Scorpid Poison"] = "Ability_PoisonSting",
   ["Shell Shield"] = "Ability_Hunter_Pet_Turtle",
+  ["Sonic Blast"] = "Spell_Nature_Sleep",
   ["Swipe"] = "INV_Misc_MonsterClaw_03",
   ["Tendon Rip"] = "Ability_Hunter_Pet_Hyena",
   ["Thunderstomp"] = "Ability_Hunter_Pet_Gorilla",

@@ -2,6 +2,21 @@
 
 All notable changes to Beast Training Tracker, newest first.
 
+## 2.1.3 - 2026-11-27
+
+### Fixed
+
+- Broodwidow was listed as teaching Dash 3. It teaches Web 1. Thanks to **user_agvjza376ndbx5iu** on CurseForge for spotting it!
+
+### Changed
+
+- Refreshed all pet ability and special pet data from Petopia's latest WoW Forever lists:
+  - **Sonic Blast** (Bats) is now tracked, with all 5 ranks and the beasts that teach them.
+  - Around 90 new teachers, including Riverglades, Mount Hyjal, Moonglade and Dustwallow Marsh beasts, and corrected ranks for others (for example, Winterspring Screecher teaches Mine! 5, not Dive 3).
+  - New special pets: Kackle, Zopilote, Old Rusthowl, Ombassa, Krek the Noxious, Aku'mai Snapjaw, Chasm Crawler, Riding Wolf, Slavering Hound, Hungry Crocolisk and Gharrik.
+  - Removed Olm the Wise and Broodmother Valraxx, which Petopia no longer lists.
+  - Ghostfang's attack speed is now 2.0, and Araga, Humar the Pridelord, Carnage and Deviate Dreadfang are no longer marked as unique looks.
+
 ## 2.1.2 - 2026-11-22
 
 ### Added

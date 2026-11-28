@@ -72,7 +72,6 @@ ns.respawnTimes = {
   ["Old Cliff Jumper"] = { 43200, 86400, 1 },
   ["Old Grizzlegut"] = { 43200, 86400, 1 },
   ["Old Vicejaw"] = { 5400, 9000, 1 },
-  ["Olm the Wise"] = { 43200, 86400, 1 },
   ["Raging Agam'ar"] = { 7200, 7200, 15 },
   ["Rak'shiri"] = { 86400, 172800, 1 },
   ["Ravage"] = { 43200, 86400, 14 },

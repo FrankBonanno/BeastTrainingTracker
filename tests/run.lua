@@ -40,6 +40,14 @@ test("ability data: ranks are 1..n with non-decreasing pet levels", function()
   end
 end)
 
+test("ability data: Broodwidow teaches Web 1, not Dash 3", function()
+  local ns = H.load()
+  local found = {}
+  for _, e in ipairs(ns.teacherIndex["Broodwidow"] or {}) do found[e.ab.name .. " " .. e.rank.rank] = true end
+  ok(found["Web 1"], "Broodwidow should teach Web 1")
+  ok(not found["Dash 3"], "Broodwidow does not teach Dash 3")
+end)
+
 local FAMILIES = {}
 for _, f in ipairs({ "Bat", "Bear", "Bird of Prey", "Boar", "Carrion Bird", "Cat", "Core Hound", "Crab", "Crocolisk",
   "Fox", "Gorilla", "Hyena", "Raptor", "Scorpid", "Spider", "Tallstrider", "Turtle", "Wind Serpent", "Wolf" }) do
